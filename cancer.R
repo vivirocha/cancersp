@@ -22,6 +22,7 @@ library(raster)
 library(tmap)
 library(plotly)
 
+
 dados = read.dbf(file = "pacigeral.dbf") #pacote raster para leitura de .dbf
 
 -------------------------------------------------------------------------------
@@ -44,30 +45,9 @@ min(dados$IDADE) #Para encontrarmos a idade miníma dos pacientes.
 
 dados$PCID <- 1 # Criar nova coluna com quantidade 1 de paciente por linha
 
------------------------------------------------------------------------------
- 
-# Quantidade de casos por ano
+----------------------------------------------------------------------------
   
-anos <- dados
-  anos$SEXO[anos$SEXO==1] <- "Homem" # Renomeando os valores das observações de 1 para Homem e 2 para Mulher.
-  anos$SEXO[anos$SEXO==2] <- "Mulher" 
-
-anos <- group_by(anos, ANODIAG, SEXO) %>%
-  summarise(sum(PCID))
-
-
-######plotar gráfico de série temporal ou barras usando o pacote PLOTLY
-
-graf1 <- ggplot(anos, aes(x = ANODIAG, y = sum(PCID))) +
-  geom_bar() 
-
-ggplotly(graf1)
-
-
-?geom_bar
-
------------------------------------------------------------------------------
-
+  ############################ MAPA 1 ######################################
 
 # mapa estado de São Paulo
 mapa <- shapefile("SP_Municipios_2021.shp")
@@ -82,3 +62,77 @@ tm_shape(mapa)+
   tm_fill()+
   tm_borders()
 
+############## FALTA CUSTOMIZAR O MAPA E COLOCAR OS DADOS DENTRO DAS CIDADES
+
+-----------------------------------------------------------------------------
+ 
+# Quantidade de casos de câncer por ano e por sexo
+  
+anos <- dados
+  anos$SEXO[anos$SEXO==1] <- "Homem" # Renomeando os valores das observações de 1 para Homem e 2 para Mulher.
+  anos$SEXO[anos$SEXO==2] <- "Mulher" 
+
+  
+############# PRIMEIRO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR SEXO ###############
+  
+cancersexo <- group_by(anos,SEXO) %>%
+  summarise(sum(PCID))
+
+cancersexo$TOTAL <- cancersexo$`sum(PCID)`
+
+g1 <- ggplot(cancersexo, aes(x = SEXO, y = TOTAL, fill = SEXO)) +
+  geom_col(position = "dodge")+
+  labs(title = "Total de pacientes com câncer por ano de 2000 a 2022",
+       x = "Sexo", 
+       y = "Total de pacientes")
+
+ggplotly(g1 + scale_fill_manual(values=c('#00BFFF',
+                                         '#DA70D6')))
+
+---------------------------------------------------------------------------------------
+
+
+############# SEGUNDO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ANO ###############
+
+anos <-group_by(anos,ANODIAG, SEXO, ESCOLARI, CLINICA) %>%
+  summarise(sum(PCID))
+anos$TOTAL <- anos$`sum(PCID)`
+
+g2 <- ggplot(anos, aes(x = ANODIAG, y = TOTAL, fill = SEXO)) +
+  geom_col(position = "dodge", stat='identity')+
+  labs(title = "Total de pacientes com câncer por ano de 2000 a 2022",
+       x = "Anos", 
+       y = "Total de pacientes")
+
+ggplotly(g2 + scale_fill_manual(values=c('#00BFFF',
+                                         '#DA70D6')))
+
+-----------------------------------------------------------------------------
+
+############# TERCEIRO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ESCOLARIDADE ###############
+
+escolaridade <-group_by(anos, ESCOLARI) %>%
+  summarise(sum(PCID))
+escolaridade$TOTAL <- escolaridade$`sum(PCID)`
+
+g3 <- ggplot(anos, aes(x = ESCOLARI, y = TOTAL, fill = factor(ESCOLARI))) +
+  geom_bar(position = "dodge", stat='identity')+ 
+  labs(title = "Total de pacientes com câncer por Escolaridade",
+       x = "Escolaridade", 
+       y = "Total de pacientes")
+
+ggplotly(g3+ scale_fill_brewer(palette = "BrBG"))
+
+############# QUARTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ESPECIALIDADE ###############
+
+clinica <-group_by(anos,ANODIAG, CLINICA) %>%
+  summarise(sum(PCID))
+clinica$TOTAL <- clinica$`sum(PCID)`
+
+g4 <- ggplot(clinica, aes(x = CLINICA, y = TOTAL, fill = factor(CLINICA))) +
+  geom_bar(position = "dodge", stat='identity')+ 
+  labs(title = "Total de pacientes com câncer por Especialidade",
+       x = "Especialidade", 
+       y = "Total de pacientes")
+
+ggplotly(g4+ scale_fill_brewer(palette = "BrBG"))

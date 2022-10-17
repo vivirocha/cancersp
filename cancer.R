@@ -27,7 +27,7 @@ dados = read.dbf(file = "pacigeral.dbf") #pacote raster para leitura de .dbf
 
 ########################################################################
 ###                                                                  ###
-###                            ANÁLISE EXPLORATÓRIA                  ###
+###                       ANÁLISE EXPLORATÓRIA                       ###
 ###                                                                  ###
 ########################################################################
 
@@ -86,12 +86,10 @@ tm_shape(mapa)+
 # Criando um dataset para não trabalhar em cima do "original" 
   
 anos <- dados
+anos$TOTAL <- sum(anos$PCID) 
 
-anos <-group_by(anos,ANODIAG, SEXO, ESCOLARI, CATEATEND, TOPO, TOPOGRUP, NAOTRAT, ULTINFO, TRATCONS, TRATAMENTO) %>%
-  summarise(sum(PCID))
-anos$TOTAL <- anos$`sum(PCID)`
 
-  anos$SEXO[anos$SEXO==1] <- "Homem" # Renomeando os valores das observações de 1 para Homem e 2 para Mulher.
+  anos$SEXO[anos$SEXO==1] <- "Homem" # Renomeando os valores das observações.
   anos$SEXO[anos$SEXO==2] <- "Mulher" 
   anos$ESCOLARI[anos$ESCOLARI==1] <- "Analfabeto"
   anos$ESCOLARI[anos$ESCOLARI==2] <- "Ens. Fund. Incompleto"
@@ -118,15 +116,15 @@ anos$TOTAL <- anos$`sum(PCID)`
   anos$ULTINFO[anos$ULTINFO==4] <- "Obito por outras causas, SOE"
 
 ############# PRIMEIRO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR SEXO ###############
+
+dtg1 <-group_by(anos, SEXO) %>%
+    summarise(sum(PCID))
   
-cancersexo <- group_by(anos,SEXO) %>%
-  summarise(sum(PCID))
+dtg1$TOTAL <- dtg1$`sum(PCID)`
 
-cancersexo$TOTAL <- cancersexo$`sum(PCID)`
-
-g1 <- ggplot(cancersexo, aes(x = SEXO, y = TOTAL, fill = SEXO)) +
+g1 <- ggplot(dtg1, aes(x = SEXO, y = TOTAL, fill = factor(SEXO))) +
   geom_col(position = "dodge")+
-  labs(title = "Total de pacientes com câncer por sexo",
+  labs(title = "Total de pacientes com câncer dividido por sexo",
        x = "Sexo", 
        y = "Total de pacientes")
 
@@ -138,24 +136,28 @@ ggplotly(g1 + scale_fill_manual(values=c('#00BFFF',
 
 ############# SEGUNDO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ANO ###############
 
-g2 <- ggplot(anos, aes(x = ANODIAG, y = TOTAL, fill = SEXO)) +
-  geom_col(position = "dodge", stat='identity')+
+dtg2 <-group_by(anos, ANODIAG) %>%
+  summarise(sum(PCID))
+
+dtg2$TOTAL <- dtg2$`sum(PCID)`
+
+g2 <- ggplot(dtg2, aes(x = ANODIAG, y = TOTAL, fill = factor(ANODIAG))) +
+  geom_col(position = "dodge")+
   labs(title = "Total de pacientes com câncer por ano de 2000 a 2022",
        x = "Anos", 
        y = "Total de pacientes")
 
-ggplotly(g2 + scale_fill_manual(values=c('#00BFFF',
-                                         '#DA70D6')))
+ggplotly(g2 + scale_fill_brewer(palette = "BrBG"))
 
 -----------------------------------------------------------------------------
 
 ############# TERCEIRO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ESCOLARIDADE ###############
 
-escolaridade <-group_by(anos, ESCOLARI) %>%
+dtg3 <-group_by(anos, ESCOLARI) %>%
   summarise(sum(PCID))
-escolaridade$TOTAL <- escolaridade$`sum(PCID)`
+dtg3$TOTAL <- dtg3$`sum(PCID)`
 
-g3 <- ggplot(anos, aes(x = ESCOLARI, y = TOTAL, fill = factor(ESCOLARI))) +
+g3 <- ggplot(dtg3, aes(x = ESCOLARI, y = TOTAL, fill = factor(ESCOLARI))) +
   geom_bar(position = "dodge", stat='identity')+ 
   labs(title = "Total de pacientes com câncer por Escolaridade",
        x = "Escolaridade", 
@@ -165,14 +167,77 @@ ggplotly(g3+ scale_fill_brewer(palette = "BrBG"))
 
 ############# QUARTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ESPECIALIDADE ###############
 
-clinica <-group_by(anos,ANODIAG, CLINICA) %>%
+dtg4 <-group_by(anos, CLINICA) %>%
   summarise(sum(PCID))
-clinica$TOTAL <- clinica$`sum(PCID)`
+dtg4$TOTAL <- dtg4$`sum(PCID)`
 
-g4 <- ggplot(clinica, aes(x = CLINICA, y = TOTAL, fill = factor(CLINICA))) +
+g4 <- ggplot(dtg4, aes(x = CLINICA, y = TOTAL, fill = factor(CLINICA))) +
   geom_bar(position = "dodge", stat='identity')+ 
   labs(title = "Total de pacientes com câncer por Especialidade",
        x = "Especialidade", 
        y = "Total de pacientes")
 
 ggplotly(g4+ scale_fill_brewer(palette = "BrBG"))
+
+############# QUINTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR CATEGORIA DE ATENDIMENTO ###############
+
+dtg5 <-group_by(anos, CATEATEND) %>%
+  summarise(sum(PCID))
+dtg5$TOTAL <- dtg5$`sum(PCID)`
+
+g5 <- ggplot(dtg5, aes(x = CATEATEND, y = TOTAL, fill = factor(CATEATEND))) +
+  geom_bar(position = "dodge", stat='identity')+ 
+  labs(title = "Total de pacientes com câncer por Categoria de atendimento",
+       x = "Categoria de atendimento", 
+       y = "Total de pacientes")
+
+ggplotly(g5+ scale_fill_brewer(palette = "BrBG"))
+
+############# SEXTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR NÃO ATENDIMENTO ###############
+
+dtg6 <-group_by(anos, NAOTRAT) %>%
+  summarise(sum(PCID))
+dtg6$TOTAL <- dtg6$`sum(PCID)`
+
+g6 <- ggplot(dtg6, aes(x = NAOTRAT, y = TOTAL, fill = factor(NAOTRAT))) +
+  geom_bar(position = "dodge", stat='identity')+ 
+  labs(title = "Total de pacientes com câncer por Não Atendimento",
+       x = "Motivo para não atendimento", 
+       y = "Total de pacientes")
+
+ggplotly(g6+ scale_fill_brewer(palette = "BrBG"))
+
+############# SÉTIMO GRÁFICO - ÚLTIMA INFORMAÇÃO DO PACIENTE ###############
+
+dtg7 <-group_by(anos, ULTINFO) %>%
+  summarise(sum(PCID))
+dtg7$TOTAL <- dtg7$`sum(PCID)`
+
+g7 <- ggplot(dtg7, aes(x = ULTINFO, y = TOTAL, fill = factor(ULTINFO))) +
+  geom_bar(position = "dodge", stat='identity')+ 
+  labs(title = "Total de pacientes com câncer por Não Atendimento",
+       x = "Motivo para não atendimento", 
+       y = "Total de pacientes")
+
+ggplotly(g7 + scale_fill_brewer(palette = "BrBG"))
+
+############# ÓITAVO GRÁFICO - TRATAMENTO ###############
+
+dtg8 <-group_by(anos, TRATAMENTO) %>%
+  summarise(sum(PCID))
+dtg8$TOTAL <- dtg8$`sum(PCID)`
+
+g8 <- ggplot(dtg8, aes(x = TRATAMENTO, y = TOTAL, fill = factor(TRATAMENTO))) +
+  geom_bar(position = "dodge", stat='identity')+ 
+  labs(title = "Total de pacientes com câncer - Tratamento",
+       x = "Tratamento", 
+       y = "Total de pacientes")
+
+ggplotly(g8 + scale_fill_brewer(palette = "BrBG"))
+
+########################################################################
+###                                                                  ###
+###                       MACHINE LEARNING                           ###
+###                                                                  ###
+########################################################################
+

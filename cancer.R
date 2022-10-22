@@ -15,13 +15,16 @@ install.packages("dplyr")
 install.packages("raster")
 install.packages("tmap")
 install.packages("plotly")
+install.packages("caTools")
+install.packages("h2o")
 library(dplyr)
 library(foreign)
 library(lubridate)
 library(raster)
 library(tmap)
 library(plotly)
-
+library(caTools)
+library(h2o)
 
 dados = read.dbf(file = "pacigeral.dbf") #pacote raster para leitura de .dbf
 
@@ -260,35 +263,10 @@ dfmodel <- filter(dfmodel, IDADE > 12)
 # Excluindo algumas variáveis:
 dfmodel <- subset(dfmodel, select = -c(CICI,CICIGRUP,CICISUBGRU,CIDADE,DTCONSULT,DTDIAG,DIAGPREV,OUTRACLA,BASEDIAG,CONSDIAG,DTTRAT,DTULTINFO,ULTINFO,ANODIAG,TRATHOSP,INSTORIG,TRATFANTES,TRATFAPOS,IBGEATEN,HABILIT,HABIT11,HABILIT1,HABILIT2,DRS,RRAS,PERDASEG,DTRECIDIVA,CIDADEH))
 
-# Transformando as variáveis categóricas
+# Alterando a posição da variável de saída:
+dfmodel <-dfmodel%>%relocate(TRATAMENTO, .after = DSCCIDO)
 
-unique(dfmodel$UFNASC)
-unique(dfmodel$UFRESID)
-unique(dfmodel$TOPO)
-unique(dfmodel$TOPOGRUP)
-unique(dfmodel$DESCTOPO)
-unique(dfmodel$DESCMORFO)
-unique(dfmodel$EC)
-unique(dfmodel$ECGRUP)
-unique(dfmodel$T)
-unique(dfmodel$N)
-unique(dfmodel$M)
-unique(dfmodel$PT)
-unique(dfmodel$PN)
-unique(dfmodel$PM)
-unique(dfmodel$META01)
-unique(dfmodel$META02)
-unique(dfmodel$META03)
-unique(dfmodel$META04)
-unique(dfmodel$TRATAMENTO)
-unique(dfmodel$FAIXAETAR)
-unique(dfmodel$DSCCIDO)
-unique(dfmodel$REC01)
-unique(dfmodel$REC02)
-unique(dfmodel$REC03)
-unique(dfmodel$REC04)
-
-# Tratando valores inconsistentes
+# Verificando se existe valores inconsistentes
 is.null(dfmodel$UFNASC)
 sum(is.na(dfmodel$UFNASC))
 
@@ -301,10 +279,10 @@ sum(is.na(dfmodel$TOPO))
 is.null(dfmodel$TOPOGRUP)
 sum(is.na(dfmodel$TOPOGRUP))
 
-is.null(dfmodel$DESCTOPO)###########################
+is.null(dfmodel$DESCTOPO)
 sum(is.na(dfmodel$DESCTOPO))
 
-is.null(dfmodel$DESCMORFO)###########################
+is.null(dfmodel$DESCMORFO)
 sum(is.na(dfmodel$DESCMORFO))
 
 is.null(dfmodel$EC)
@@ -322,22 +300,22 @@ sum(is.na(dfmodel$N))
 is.null(dfmodel$M)
 sum(is.na(dfmodel$M))
 
-is.null(dfmodel$PT)###########################
+is.null(dfmodel$PT)
 sum(is.na(dfmodel$PN))
 
-is.null(dfmodel$PM)###########################
+is.null(dfmodel$PM)
 sum(is.na(dfmodel$PM))
 
 is.null(dfmodel$META01)
 sum(is.na(dfmodel$META01))
 
-is.null(dfmodel$META02)###########################
+is.null(dfmodel$META02)
 sum(is.na(dfmodel$META02))
 
-is.null(dfmodel$META03)###########################
+is.null(dfmodel$META03)
 sum(is.na(dfmodel$META03))
 
-is.null(dfmodel$META04)###########################
+is.null(dfmodel$META04)
 sum(is.na(dfmodel$META04))
 
 is.null(dfmodel$TRATAMENTO)
@@ -346,12 +324,14 @@ sum(is.na(dfmodel$TRATAMENTO))
 is.null(dfmodel$FAIXAETAR)
 sum(is.na(dfmodel$FAIXAETAR))
 
-is.null(dfmodel$DSCCIDO)###########################
+is.null(dfmodel$DSCCIDO)
 sum(is.na(dfmodel$DSCCIDO))
 
 # Percentual de dados faltantes:
 round(colSums(is.na(dfmodel))*100/nrow(dfmodel), 2)
 
+# TRATCONS= 8,52% - (Os valores faltantes serão substituídos pela média)
+# DIAGTRAT = 8,55% - (Os valores faltantes serão substituídos pela média)
 # DESCTOPO = 2,36% - (Os valores faltantes serão substituídos pela média)
 # DESCMORFO = 1,99% - (Os valores faltantes serão substituídos pela média)
 # PT = 56,63% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
@@ -379,24 +359,32 @@ dfmodel$REC02 <- NULL
 dfmodel$REC03 <- NULL
 dfmodel$REC04 <- NULL
 
-# Tratando dados faltantes:
-class(dfmodel$DESCTOPO)
-dfmodel$DESCTOPO <- as.numeric(as.character(dfmodel$DESCTOPO))
-class(dfmodel$DESCTOPO)
-mean(dfmodel$DESCTOPO, na.rm = TRUE)
-dfmodel$DESCTOPO = ifelse(is.na(dfmodel$DESCTOPO), mean(dfmodel$DESCTOPO, na.rm = TRUE), dfmodel$DESCTOPO)
-sum(is.na(dfmodel$DESCTOPO))
-
-mean(dfmodel$DESCMORFO, na.rm = TRUE)
-dfmodel$DESCMORFO = ifelse(is.na(dfmodel$DESCMORFO), mean(dfmodel$DESCMORFO, na.rm = TRUE), dfmodel$DESCMORFO)
-sum(is.na(dfmodel$DESCMORFO))
-
-class(dfmodel$DSCCIDO)
-dfmodel$DSCCIDO <- as.numeric(as.character(dfmodel$DSCCIDO))
-class(dfmodel$DSCCIDO)
-mean(dfmodel$DSCCIDO, na.rm = TRUE)
-dfmodel$DSCCIDO = ifelse(is.na(dfmodel$DSCCIDO), mean(dfmodel$DSCCIDO, na.rm = TRUE), dfmodel$DSCCIDO)
-sum(is.na(dfmodel$DSCCIDO))
+# Verificando valores únicos
+unique(dfmodel$UFNASC)
+unique(dfmodel$UFRESID)
+unique(dfmodel$TOPO)
+unique(dfmodel$TOPOGRUP)
+unique(dfmodel$DESCTOPO)
+unique(dfmodel$DESCMORFO)
+unique(dfmodel$EC)
+unique(dfmodel$ECGRUP)
+unique(dfmodel$T)
+unique(dfmodel$N)
+unique(dfmodel$M)
+unique(dfmodel$PT)
+unique(dfmodel$PN)
+unique(dfmodel$PM)
+unique(dfmodel$META01)
+unique(dfmodel$META02)
+unique(dfmodel$META03)
+unique(dfmodel$META04)
+unique(dfmodel$TRATAMENTO)
+unique(dfmodel$FAIXAETAR)
+unique(dfmodel$DSCCIDO)
+unique(dfmodel$REC01)
+unique(dfmodel$REC02)
+unique(dfmodel$REC03)
+unique(dfmodel$REC04)
 
 #SUbstituindo dados categóricos
 
@@ -545,33 +533,88 @@ dfmodel$DSCCIDO = factor(dfmodel$DSCCIDO, levels = c("CARCINOMA BASOCELULAR SOE"
                                                      "MEDULOMIOBLASTOMA","SARCOMA DE MASTOCITOS","SARCOMA EMBRIONARIO","BLASTOMA PLEURO PULMONAR","NEFROMA MESOBLASTICO","GLUCAGONOMA SOE","NEFROMA MALIGNO CISTICO","GONADOBLASTOMA","DOEN\x80A DE HODGKIN DEPLECAO LINFOCITICA COM FIBROSE DIFUSA","TUMOR TROFOBLASTICO DE LOCALIZACAO PLACENTARIA","FIBROSSARCOMA AMELOBLASTICO","ANDROBLASTOMA MALIGNO","TUMOR EPITELIAL FUSOCELULAR SEMELHANTE A CELULAS TIMICAS","TUMOR JUVENIL DE CELULAS DA GRANULOSA",
                                                      "MEDULOEPITELIOMA SOE","OSTEOCONDROMATOSE SOE","HISTIOCITOSE DE CELULAS DE LANGERHANS UNIFOCAL","PAPILOMA ATIPICO DE PLEXO COROIDE","FIBROSSARCOMA DE FASCIA","TERATOMA MALIGNO INDIFERENCIADO","NEUROCITOMA OLFATORIO","TERATOMA MALIGNO INTERMEDIARIO","OSTEOSSARCOMA INTRACORTICAL","CONDROSSARCOMA JUSTACORTICAL","TUMOR DE CELULAS DE SERTOLI GRANDES CELULAS E CALCIFICADAS","TUMOR NEUROGENICO OLFATIVO","MEDULOBLASTOMA DE CELULAS GRANDES",
                                                      "RETINOBLASTOMA SOE","TUMOR TERATOIDERABDOIDE ATIPICO","NEUROEPITELIOMA SOE","PINEALOMA","PANCREATOBLASTOMA","GLIOFIBROMA","NEFROBLASTOMA CISTICO PARCIALMENTE DIFERENCIADO","LEUCEMIA MIELOMONOCITICA JUVENIL","MEDULOEPITELIOMA TERATOIDE","ASTROCITOMA DESMOPLASTICO INFANTI","FIBROSSARCOMA INFANTIL","LEUCEMIA BASOFILICA AGUDA","RETINOBLASTOMA INDIFERENCIADO","RABDOMIOSSARCOMA COM DIFERENCIACAO GANGLIONICA","MELANOMATOSE MENINGEANA","SIALOBLASTOMA"), labels(c(seq.int(1:701))))  
+# Tratando dados faltantes:
+class(dfmodel$TRATCONS)
+dfmodel$TRATCONS <- as.numeric(as.character(dfmodel$TRATCONS))
+class(dfmodel$TRATCONS)
+mean(dfmodel$TRATCONS, na.rm = TRUE)
+dfmodel$TRATCONS = ifelse(is.na(dfmodel$TRATCONS), mean(dfmodel$TRATCONS, na.rm = TRUE), dfmodel$TRATCONS)
+sum(is.na(dfmodel$TRATCONS))
+
+class(dfmodel$DIAGTRAT)
+dfmodel$DIAGTRAT <- as.numeric(as.character(dfmodel$DIAGTRAT))
+class(dfmodel$DIAGTRAT)
+mean(dfmodel$DIAGTRAT, na.rm = TRUE)
+dfmodel$DIAGTRAT = ifelse(is.na(dfmodel$DIAGTRAT), mean(dfmodel$DIAGTRAT, na.rm = TRUE), dfmodel$DIAGTRAT)
+sum(is.na(dfmodel$DIAGTRAT))
+
+class(dfmodel$DESCTOPO)
+dfmodel$DESCTOPO <- as.numeric(as.character(dfmodel$DESCTOPO))
+class(dfmodel$DESCTOPO)
+mean(dfmodel$DESCTOPO, na.rm = TRUE)
+dfmodel$DESCTOPO = ifelse(is.na(dfmodel$DESCTOPO), mean(dfmodel$DESCTOPO, na.rm = TRUE), dfmodel$DESCTOPO)
+sum(is.na(dfmodel$DESCTOPO))
+
+class(dfmodel$DESCMORFO)
+dfmodel$DESCMORFO <- as.numeric(as.character(dfmodel$DESCMORFO))
+class(dfmodel$DESCMORFO)
+mean(dfmodel$DESCMORFO, na.rm = TRUE)
+dfmodel$DESCMORFO = ifelse(is.na(dfmodel$DESCMORFO), mean(dfmodel$DESCMORFO, na.rm = TRUE), dfmodel$DESCMORFO)
+sum(is.na(dfmodel$DESCMORFO))
+
+class(dfmodel$DSCCIDO)
+dfmodel$DSCCIDO <- as.numeric(as.character(dfmodel$DSCCIDO))
+class(dfmodel$DSCCIDO)
+mean(dfmodel$DSCCIDO, na.rm = TRUE)
+dfmodel$DSCCIDO = ifelse(is.na(dfmodel$DSCCIDO), mean(dfmodel$DSCCIDO, na.rm = TRUE), dfmodel$DSCCIDO)
+sum(is.na(dfmodel$DSCCIDO))
 
 # Escalonamento
 glimpse(dfmodel)
 
-dfmodel[,1] = scale(dfmodel[,1])
-dfmodel[,2] = scale(dfmodel[,2])
-dfmodel[,3] = scale(dfmodel[,3])
-dfmodel[,7] = scale(dfmodel[,7])
-dfmodel[,8] = scale(dfmodel[,8])
+dfmodel[,1:3] = scale(dfmodel[,1:3])
+dfmodel[,7:8] = scale(dfmodel[,7:8])
 dfmodel[,19] = scale(dfmodel[,19])
-dfmodel[,21:25] = scale(dfmodel[,21:25])
-dfmodel[,27:52] = scale(dfmodel[,27:52])
-dfmodel[,54:59] = scale(dfmodel[,54:59])
+dfmodel[,21:51] = scale(dfmodel[,21:51])
+dfmodel[,53:58] = scale(dfmodel[,53:58])
+
+# Excluindo colunas que não tem variância
+dfmodel$S <- NULL
+dfmodel$QUIMIOANT <- NULL
+dfmodel$HORMOANT <- NULL
+dfmodel$TMOANT <- NULL
+dfmodel$IMUNOANT <- NULL
+dfmodel$OUTROANT <- NULL
+dfmodel$ERRO <- NULL  
+
+# Verificando se ainda existe valores faltantes
+dfmodel[is.na(dfmodel), ] 
+
+# Separando o dataset para treinamento e teste
+set.seed(1)
+separacao <- sample.split(dfmodel$TRATAMENTO, SplitRatio = 0.70)
+treinamento <- subset(dfmodel, separacao == TRUE)
+teste <- subset(dfmodel, separacao == FALSE)
 
 
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+########################################################################
+###                                                                  ###
+###                         REDES NEURAIS                            ###
+###                                                                  ###
+########################################################################
+
+h2o.init(nthreads = -1)
+
+classificador = h2o.deeplearning(y = 'TRATAMENTO',
+                                 training_frame = as.h2o(treinamento),
+                                 activation = 'Rectifier', #função de ativação
+                                 hidden = c(100), #quantas camadas escondidas - 1 camada oculta com 100 neurônios
+                                 epochs = 1000) #quantas vezes vai ser feito o ajuste de pesos
+
+previsao <- h2o.predict(classificador, newdata = as.h2o(teste[-54]))
+previsao <- (previsao > 0.5)
+previsao <- as.vector(previsao)
+matrizconfusao <- table(teste[,54],previsao)  
   
   
   

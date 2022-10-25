@@ -86,11 +86,43 @@ mapa <- shapefile("SP_Municipios_2021.shp")
 # criando coluna IBGE com os dados de CD_MUN
 mapa$IBGE <- mapa$CD_MUN
 
+# Dados a serem inseridos no mapa
+
+nokid <- dados
+nokid <- filter(nokid, IDADE > 12)
+
+
+nokid$IBGE <- as.numeric(as.character(nokid$IBGE))
+class(nokid$IBGE)
+class(nokid$CIDADE)
+class(nokid$PCID)
+
+nokid <- subset(nokid, select = c(IBGE, CIDADE, PCID))
+nokid <- group_by(nokid, IBGE, CIDADE) %>%
+         summarise(sum(PCID))
+
+# Unindo os dados no mapa
+
+mapa=merge(mapa,nokid,by="IBGE", all.x=T) 
+names(nokid)
+
+# Customizando o mapa do Estado de São Paulo
+tmap_mode("plot")
+tm_shape(mapa)+
+  tm_fill("IBGE", auto.palette.mapping=FALSE, 
+          title="Cidades de São Paulo")+
+  tm_legend(position=c("left","bottom"))+
+  tm_borders(alpha=.5)+
+  tm_bubbles(size = 'PCID',col = '#b3de69', title.size='CIDADE') +
+  tm_legend(legend.format = list(text.separator= "a"))
+
+
 # mapa remodelado (mais bonito)
 tmap_mode("plot")
 tm_shape(mapa)+
   tm_fill()+
-  tm_borders()
+  tm_borders()+
+tm_bubbles(size = 'IBGE',col = '#b3de69', title.size='IBGE')
 
 ############## FALTA CUSTOMIZAR O MAPA E COLOCAR OS DADOS DENTRO DAS CIDADES
 
@@ -615,6 +647,7 @@ dfmodel[is.na(dfmodel), ]
 ########################################################################
 
 # Separando o dataset para treinamento e teste
+
 set.seed(1)
 separacao <- sample.split(dfmodel$TRATAMENTO, SplitRatio = 0.70)
 treinamento <- subset(dfmodel, separacao == TRUE)
@@ -624,18 +657,41 @@ h2o.init(nthreads = -1)
 
 classificador = h2o.deeplearning(y = 'TRATAMENTO',
                                  training_frame = as.h2o(treinamento),
-                                 activation = 'Rectifier', #função de ativação
-                                 hidden = c(100), #quantas camadas escondidas - 1 camada oculta com 100 neurônios
-                                 epochs = 1000) #quantas vezes vai ser feito o ajuste de pesos
+                                 hidden = c(100,100,100), #quantas camadas escondidas - 1 camada oculta com 100 neurônios
+                                 epochs = 100) #quantas vezes vai ser feito o ajuste de pesos
 
 previsao <- h2o.predict(classificador, newdata = as.h2o(teste[-54]))
 previsao <- previsao$predict
 previsao <- as.vector(previsao)
-matrizconfusao - table(teste[,54], previsao)
+matrizconfusao <- table(teste[,54], previsao)
 confusionMatrix(matrizconfusao)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+classificador = h2o.deeplearning(y = 'TRATAMENTO',
+                                 training_frame = as.h2o(treinamento),
+                                 hidden = c(100), #quantas camadas escondidas - 1 camada oculta com 100 neurônios
+                                 epochs = 500) #quantas vezes vai ser feito o ajuste de pesos
+
+
 
 matrizconfusao <- table(factor(teste, 1), factor(previsao, 1))
 
+
+activation = 'Rectifier', #função de ativação
 
 
 

@@ -11,31 +11,9 @@
 # da Fundação Oncocentro de São Paulo (FOSP) 
 #http://www.fosp.saude.sp.gov.br/fosp/diretoria-adjunta-de-informacao-e-epidemiologia/rhc-registro-hospitalar-de-cancer/banco-de-dados-do-rhc/
 
-install.packages("dplyr")
-install.packages("raster")
-install.packages("tmap")
-install.packages("plotly")
-install.packages("caTools")
-install.packages("h2o")
-install.packages("caret")
-library(dplyr)
-library(foreign)
-library(lubridate)
-library(raster)
-library(tmap)
-library(plotly)
-library(caTools)
-library(h2o)
-library(caret)
-
-
-library(sf)         # Simple features for R
-
-
 install.packages("pacman")
-install.packages('BiocManager')
 library(pacman)
-pacman::p_load(tmap, statR, tidyverse, sp, cartogram)
+pacman::p_load(dplyr, raster, tmap, plotly, caTools, h2o, caret, tidyverse, sf, foreign)
 
 dados = read.dbf(file = "pacigeral.dbf") #pacote raster para leitura de .dbf
 
@@ -45,19 +23,24 @@ dados = read.dbf(file = "pacigeral.dbf") #pacote raster para leitura de .dbf
 ###                                                                  ###
 ########################################################################
 
-dim(dados) #Nosso banco de dados é composto por 1.103.941 observações e 100 variáveis.
+#O banco de dados é composto por 1.103.941 observações e 100 variáveis.
+dim(dados) 
 
-str(dados) #Para ver os tipos de dados
+#Para ver os tipos de dados
+str(dados) 
 
-head(dados) #Para ler os primeiros dados
+#Para ler os primeiros dados
+head(dados) 
 
-tail(dados) #Para ler os últimos dados
+#Para ler os últimos dados
+tail(dados) 
 
-colnames(dados) #Para saber o nome das colunas
+#Para saber o nome das colunas
+colnames(dados) 
 
 #Encontraremos as idades mínimas e máximas dos pacientes.
-max(dados$IDADE) #Para encontrarmos a idade máxima dos pacientes.
-min(dados$IDADE) #Para encontrarmos a idade miníma dos pacientes.
+max(dados$IDADE) 
+min(dados$IDADE) 
 
 #Encontraremos a média, mediana e quartis das idades dos pacientes.
 summary(dados$IDADE)
@@ -85,7 +68,6 @@ moda(dados$IDADE)
 # Criando nova coluna com quantidade 1 de paciente por linha
 dados$PCID <- 1 
 
-----------------------------------------------------------------------------
   
 ############################ MAPA 1 ######################################
 
@@ -110,7 +92,6 @@ nokid <- group_by(nokid, IBGE, CIDADE) %>%
          summarise(sum(PCID))
 
 # Unindo os dados no mapa
-
 mapa <- st_as_sf(mapa)
 st_crs(mapa)
 
@@ -130,10 +111,9 @@ tm_shape(mapa)+
   tm_symbols(col = "#FFA500", size = "PCID", title.size = "Quantidade de pacientes", scale =3)
 
 
------------------------------------------------------------------------------
+##################### DATASET  A SER TRABALHADO #############################
  
 # Criando um dataset para não trabalhar em cima do "original" 
-  
 anos <- dados
 
 # Excluindo dados de crianças
@@ -142,8 +122,8 @@ anos <- filter(anos, IDADE > 12)
 
 anos$TOTAL <- sum(anos$PCID) 
 
-
-  anos$SEXO[anos$SEXO==1] <- "Homem" # Renomeando os valores das observações.
+# Renomeando os valores de algumas observações.
+  anos$SEXO[anos$SEXO==1] <- "Homem" 
   anos$SEXO[anos$SEXO==2] <- "Mulher" 
   anos$ESCOLARI[anos$ESCOLARI==1] <- "Analfabeto"
   anos$ESCOLARI[anos$ESCOLARI==2] <- "Ens. Fund. Incompleto"
@@ -193,32 +173,30 @@ anos$TRATAMENTO = as.character(factor(anos$TRATAMENTO, levels = c("A","B","C","D
   anos$TRATAMENTO[anos$TRATAMENTO=="10"] <- "Nenhum tratamento realizado"
   
   
-  
 ############# PRIMEIRO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR SEXO ###############
-
+options (scipen=999)
+  
 dtg1 <-group_by(anos, SEXO) %>%
     summarise(sum(PCID))
   
 dtg1$TOTAL <- dtg1$`sum(PCID)`
 
-g1 <- ggplot(dtg1, aes(x = SEXO, y = TOTAL, 
-                       fill = factor(TOTAL))) +
-                       geom_col(position = "dodge")+
+g1 <- ggplot(dtg1, aes(x = SEXO, y = TOTAL)) +
+                       geom_bar(stat = "identity", position = "dodge", aes(fill =  SEXO))+
                        geom_label(aes(label = `sum(PCID)`))+
-                       scale_fill_manual(values=c("#00BFFF",
-                             "#FF8C00"))+
+                       scale_fill_manual(values=c("#C0C0C0",
+                             "#F5DEB3"))+
                        labs(title = "Total de pacientes com câncer dividido por sexo",
                        x = "Sexo", 
                        y = "Total de pacientes")+
-                       theme_test()
+                       theme_test()+
+                       theme(axis.text.x = element_text(angle = 0, hjust = 1))+
+                       theme(legend.position = "bottom", 
+                             legend.title = element_blank())+
+                       ylim(0, 600000)+
+                       theme(plot.title = element_text(hjust = 0.5, size=18))
 g1
-
 ggplotly(g1)
-
-
-
----------------------------------------------------------------------------------------
-
 
 ############# SEGUNDO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ANO ###############
 
@@ -227,46 +205,23 @@ dtg2 <-group_by(anos, ANODIAG, SEXO) %>%
 
 dtg2$TOTAL <- dtg2$`sum(PCID)`
 
-g2 <- ggplot(dtg2, aes(x = ANODIAG, y = `sum(PCID)`, fill = factor(SEXO))) +
-  geom_col(colour = "#F0F8FF", position = "stack") + 
-  scale_fill_manual(values=c("#00BFFF",
-                             "#FF8C00"))+
-  labs(title = "Total de pacientes com câncer durante o período de 2000 a 2022",
-       x = "Anos", 
-       y = "Total de pacientes")+
-  theme_test()
+g2 <- ggplot(dtg2, aes(x = ANODIAG, y = TOTAL)) +
+                       geom_bar(stat = "identity", position = "stack", aes(fill =  SEXO))+
+                       geom_label(aes(label = `sum(PCID)`),
+                       size = 3, position = position_stack(vjust = 0.5))+
+                       scale_fill_manual(values=c("#C0C0C0",
+                                                  "#F5DEB3"))+
+                       labs(title = "Total de pacientes com câncer durante o período de 2000 a 2022",
+                       x = "Anos", 
+                       y = "Total de pacientes")+
+                       theme_test()+
+                       theme(axis.text.x = element_text(angle = 0, hjust = 1))+
+                       theme(legend.position = "bottom", 
+                               legend.title = element_blank())+
+                       theme(plot.title = element_text(hjust = 0.5, size=18))
+g2
 ggplotly(g2)
 
-
------------------------------------------------------------------------------
-
-############# TERCEIRO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ESCOLARIDADE ###############
-
-dtg3 <-group_by(anos, ESCOLARI) %>%
-  summarise(sum(PCID))
-dtg3$TOTAL <- dtg3$`sum(PCID)`
-
-g3 <- ggplot(dtg3, aes(x = ESCOLARI, y = TOTAL, fill = factor(ESCOLARI))) +
-  geom_bar(position = "dodge", stat='identity')+ 
-  labs(title = "Total de pacientes com câncer por Escolaridade",
-       x = "Escolaridade", 
-       y = "Total de pacientes")
-
-ggplotly(g3+ scale_fill_brewer(palette = "BrBG"))
-
-############# QUARTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ESPECIALIDADE ###############
-
-dtg4 <-group_by(anos, CLINICA) %>%
-  summarise(sum(PCID))
-dtg4$TOTAL <- dtg4$`sum(PCID)`
-
-g4 <- ggplot(dtg4, aes(x = CLINICA, y = TOTAL, fill = factor(CLINICA))) +
-  geom_bar(position = "dodge", stat='identity')+ 
-  labs(title = "Total de pacientes com câncer por Especialidade",
-       x = "Especialidade", 
-       y = "Total de pacientes")
-
-ggplotly(g4+ scale_fill_brewer(palette = "BrBG"))
 
 ############# QUINTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR CATEGORIA DE ATENDIMENTO ###############
 
@@ -274,16 +229,20 @@ dtg5 <-group_by(anos, CATEATEND) %>%
   summarise(sum(PCID))
 dtg5$TOTAL <- dtg5$`sum(PCID)`
 
-g5 <- ggplot(dtg5, aes(x = CATEATEND, y = TOTAL, fill = factor(CATEATEND))) +
-  geom_col(colour = "#F0F8FF", position = "stack") + 
-  scale_fill_manual(values=c("#FFE4B5",
-                             "#F0E68C",
-                             "#FFA500",
-                             "#FF8C00"))+
-  labs(title = "Total de pacientes com câncer atendidos por Categoria",
-       x = "Categoria de atendimento", 
-       y = "Total de pacientes")+
-  theme_test()
+g5 <- ggplot(dtg5, aes(x = CATEATEND, y = TOTAL))+
+                       geom_bar(stat = "identity", position = "dodge", aes(fill =  CATEATEND))+
+                       geom_label(aes(label = `sum(PCID)`),
+                       size = 3, position = position_stack(vjust = 0.5))+ 
+                       labs(title = "Total de pacientes com câncer atendidos por Categoria",
+                       x = "Categoria de atendimento", 
+                       y = "Total de pacientes")+
+                       theme_test()+
+                       theme(axis.text.x = element_text(angle = 0, hjust = 1))+
+                       theme(legend.position = "bottom", 
+                       legend.title = element_blank())+
+                       theme(plot.title = element_text(hjust = 0.5, size=18))+
+                       scale_fill_brewer(type = "seq", palette = "Greys")
+g5
 ggplotly(g5)
 
 ############# SEXTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR NÃO ATENDIMENTO ###############
@@ -292,27 +251,24 @@ dtg6 <-group_by(anos, NAOTRAT) %>%
   summarise(sum(PCID))
 dtg6$TOTAL <- dtg6$`sum(PCID)`
 
-g6 <- ggplot(dtg6, aes(x = NAOTRAT, y = TOTAL, fill = factor(NAOTRAT))) +
-  geom_bar(position = "dodge", stat='identity')+ 
-  labs(title = "Total de pacientes com câncer por Não Atendimento",
-       x = "Motivo para não atendimento", 
-       y = "Total de pacientes")
+g6 <- ggplot(dtg6, aes(x = NAOTRAT, y = TOTAL))+
+             geom_bar(stat = "identity", position = "dodge", aes(fill =  NAOTRAT))+
+             geom_label(aes(label = `sum(PCID)`),
+             size = 3, position = position_stack(vjust = 0.5))+ 
+             labs(title = "Total de pacientes com câncer - Motivo do Não Atendimento",
+             x = "Motivo para não atendimento", 
+             y = "Total de pacientes")+
+             theme_test()+
+             theme(axis.text.x = element_text(angle = 0, hjust = 1))+
+             theme(legend.position = "bottom", 
+             legend.title = element_blank())+
+             theme(plot.title = element_text(hjust = 0.5, size=18))+
+             scale_fill_brewer(type = "seq", palette = "GnBu")+
+             scale_x_discrete(name = 'Motivo para o não tratamento')+
+             coord_flip()
+g6
+ggplotly(g6)
 
-ggplotly(g6+ scale_fill_brewer(palette = "BrBG"))
-
-############# SÉTIMO GRÁFICO - ÚLTIMA INFORMAÇÃO DO PACIENTE ###############
-
-dtg7 <-group_by(anos, ULTINFO) %>%
-  summarise(sum(PCID))
-dtg7$TOTAL <- dtg7$`sum(PCID)`
-
-g7 <- ggplot(dtg7, aes(x = ULTINFO, y = TOTAL, fill = factor(ULTINFO))) +
-  geom_bar(position = "dodge", stat='identity')+ 
-  labs(title = "Total de pacientes com câncer por Não Atendimento",
-       x = "Motivo para não atendimento", 
-       y = "Total de pacientes")
-
-ggplotly(g7 + scale_fill_brewer(palette = "BrBG"))
 
 ############# ÓITAVO GRÁFICO - TRATAMENTO ###############
 
@@ -320,13 +276,22 @@ dtg8 <-group_by(anos, TRATAMENTO) %>%
   summarise(sum(PCID))
 dtg8$TOTAL <- dtg8$`sum(PCID)`
 
-g8 <- ggplot(dtg8, aes(x = TRATAMENTO, y = TOTAL, fill = factor(TRATAMENTO))) +
-                       geom_col(colour = "#F0F8FF", position = "stack") + 
-                       scale_fill_brewer(palette = "YlOrBr")+
-                       labs(title = "Total de pacientes com câncer - Tratamento",
+g8 <- ggplot(dtg8, aes(x = TRATAMENTO, y = TOTAL))+
+                       geom_bar(stat = "identity", position = "dodge", aes(fill =  TRATAMENTO))+
+                       geom_label(aes(label = `sum(PCID)`),
+                       size = 3, position = position_stack(vjust = 0.5))+ 
+                       labs(title = "Quantidade de pacientes por tipo de tratamento",
                        x = "Tratamento", 
                        y = "Total de pacientes")+
-                       theme_test()
+                       theme_test()+
+                       theme(axis.text.x = element_text(angle = 0, hjust = 1))+
+                       theme(legend.position = "bottom", 
+                       legend.title = element_blank())+
+                       theme(plot.title = element_text(hjust = 0.5, size=18))+
+                       scale_fill_brewer(type = "seq", palette = "GnBu")+
+                       scale_x_discrete(name = 'TRATAMENTO')+
+                       coord_flip()
+g8
 ggplotly(g8)
 
 
@@ -711,47 +676,6 @@ previsao <- as.vector(previsao)
 matrizconfusao <- table(teste[,54], previsao)
 confusionMatrix(matrizconfusao)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-classificador = h2o.deeplearning(y = 'TRATAMENTO',
-                                 training_frame = as.h2o(treinamento),
-                                 hidden = c(100), #quantas camadas escondidas - 1 camada oculta com 100 neurônios
-                                 epochs = 500) #quantas vezes vai ser feito o ajuste de pesos
-
-
-
-matrizconfusao <- table(factor(teste, 1), factor(previsao, 1))
-
-
-activation = 'Rectifier', #função de ativação
-
-
-
-
-
-x <- as.integer(Prediction)
-y <- Test$quality
-l <- union(x, y)
-Table2 <- table(factor(x, l), factor(y, l))
-confusionMatrix(Table2)
-
-previsao <- (previsao > 0.5)
-
-  
-?all.equal
   
   
   

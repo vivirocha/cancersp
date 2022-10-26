@@ -1,0 +1,732 @@
+#######################################################################
+###                                                                 ###
+###                  TRABALHO DE CONCLUSÃO DE CURSO                 ###
+###                    DATA SCIENCE & ANALYTICS                     ###
+###                            USP/ESALQ                            ###
+###                                                                 ###
+#######################################################################
+
+# O presente trabalho será desenvolvido utilizando a base de dados do 
+# Registro Hospitalar de Câncer (RHC) disponível no endereço online
+# da Fundação Oncocentro de São Paulo (FOSP) 
+#http://www.fosp.saude.sp.gov.br/fosp/diretoria-adjunta-de-informacao-e-epidemiologia/rhc-registro-hospitalar-de-cancer/banco-de-dados-do-rhc/
+
+install.packages("dplyr")
+install.packages("raster")
+install.packages("tmap")
+install.packages("plotly")
+install.packages("caTools")
+install.packages("h2o")
+install.packages("caret")
+library(dplyr)
+library(foreign)
+library(lubridate)
+library(raster)
+library(tmap)
+library(plotly)
+library(caTools)
+library(h2o)
+library(caret)
+
+
+library(sf)         # Simple features for R
+
+
+install.packages("pacman")
+install.packages('BiocManager')
+library(pacman)
+pacman::p_load(tmap, statR, tidyverse, sp, cartogram)
+
+dados = read.dbf(file = "pacigeral.dbf") #pacote raster para leitura de .dbf
+
+########################################################################
+###                                                                  ###
+###                       ANÁLISE EXPLORATÓRIA                       ###
+###                                                                  ###
+########################################################################
+
+dim(dados) #Nosso banco de dados é composto por 1.103.941 observações e 100 variáveis.
+
+str(dados) #Para ver os tipos de dados
+
+head(dados) #Para ler os primeiros dados
+
+tail(dados) #Para ler os últimos dados
+
+colnames(dados) #Para saber o nome das colunas
+
+#Encontraremos as idades mínimas e máximas dos pacientes.
+max(dados$IDADE) #Para encontrarmos a idade máxima dos pacientes.
+min(dados$IDADE) #Para encontrarmos a idade miníma dos pacientes.
+
+#Encontraremos a média, mediana e quartis das idades dos pacientes.
+summary(dados$IDADE)
+
+#Verificando se temos valores Nulos ou NA em duas variáveis.
+is.null(dados$IDADE)
+is.null(dados$TRATAMENTO)
+sum(is.na(dados$IDADE))
+sum(is.na(dados$TRATAMENTO))
+
+#Encontraremos a moda da idade dos pacientes
+
+frequencia <- table(dados$IDADE)
+
+frequencia[frequencia == max(frequencia)]
+
+# Criando a função moda (caso seja necessário utilizá-la no decorrer do trabalho)
+moda <- function(x) {
+  tab = table(x)
+  tab[tab == max(tab)]
+}
+
+moda(dados$IDADE)
+
+# Criando nova coluna com quantidade 1 de paciente por linha
+dados$PCID <- 1 
+
+----------------------------------------------------------------------------
+  
+  ############################ MAPA 1 ######################################
+
+# mapa estado de São Paulo
+mapa <- shapefile("SP_Municipios_2021.shp")
+
+# criando coluna IBGE com os dados de CD_MUN
+mapa$IBGE <- mapa$CD_MUN
+
+# Dados a serem inseridos no mapa
+
+nokid <- dados
+nokid <- filter(nokid, IDADE > 12)
+
+nokid$IBGE <- as.numeric(as.character(nokid$IBGE))
+class(nokid$IBGE)
+class(nokid$CIDADE)
+class(mapa$PCID)
+
+nokid <- subset(nokid, select = c(IBGE, CIDADE, PCID))
+nokid <- group_by(nokid, IBGE, CIDADE) %>%
+  summarise(sum(PCID))
+
+# Unindo os dados no mapa
+
+mapa <- st_as_sf(mapa)
+st_crs(mapa)
+
+mapa=merge(mapa,nokid,by="IBGE", all.x=T) 
+mapa$PCID <- mapa$`sum(PCID)`
+names(mapa)
+
+# Customizando o mapa do Estado de São Paulo
+tmap_mode("plot")
+tm_shape(mapa)+
+  tm_fill(col = "#F0FFF0")+
+  tm_style("col_blind")+
+  tm_legend(position=c("left","bottom"))+
+  tm_compass()+
+  tm_scale_bar()+
+  tm_borders(alpha=0.3)+
+  tm_symbols(col = "#FFA500", size = "PCID", title.size = "Quantidade de pacientes", scale =3)
+
+
+-----------------------------------------------------------------------------
+  
+  # Criando um dataset para não trabalhar em cima do "original" 
+  
+  anos <- dados
+
+# Excluindo dados de crianças
+anos <- subset(anos, select = -c(CICI,CICIGRUP,CICISUBGRU)) 
+anos <- filter(anos, IDADE > 12)
+
+anos$TOTAL <- sum(anos$PCID) 
+
+
+anos$SEXO[anos$SEXO==1] <- "Homem" # Renomeando os valores das observações.
+anos$SEXO[anos$SEXO==2] <- "Mulher" 
+anos$ESCOLARI[anos$ESCOLARI==1] <- "Analfabeto"
+anos$ESCOLARI[anos$ESCOLARI==2] <- "Ens. Fund. Incompleto"
+anos$ESCOLARI[anos$ESCOLARI==3] <- "Ens. Fund. Completo"
+anos$ESCOLARI[anos$ESCOLARI==4] <- "Ens. Médio"
+anos$ESCOLARI[anos$ESCOLARI==5] <- "Superior"
+anos$ESCOLARI[anos$ESCOLARI==9] <- "Ignorada"
+anos$CATEATEND[anos$CATEATEND==1] <- "Convenio"
+anos$CATEATEND[anos$CATEATEND==2] <- "SUS"
+anos$CATEATEND[anos$CATEATEND==3] <- "Particular"
+anos$CATEATEND[anos$CATEATEND==9] <- "Sem info."
+anos$NAOTRAT[anos$NAOTRAT==1] <- "Recusa do tratamento"
+anos$NAOTRAT[anos$NAOTRAT==2] <- "Doença Avancada, falta de condicoes clinicas"
+anos$NAOTRAT[anos$NAOTRAT==3] <- "Outras doencas associadas"
+anos$NAOTRAT[anos$NAOTRAT==4] <- "Abandono de tratamento"
+anos$NAOTRAT[anos$NAOTRAT==5] <- "Obito por cancer"
+anos$NAOTRAT[anos$NAOTRAT==6] <- "Obito por outras causas, SOE"
+anos$NAOTRAT[anos$NAOTRAT==7] <- "Outras"
+anos$NAOTRAT[anos$NAOTRAT==8] <- "Nao se aplica"
+anos$NAOTRAT[anos$NAOTRAT==9] <- "Sem informacao"
+anos$ULTINFO[anos$ULTINFO==1] <- "Vivo, com cancer"
+anos$ULTINFO[anos$ULTINFO==2] <- "Vivo, SOE"
+anos$ULTINFO[anos$ULTINFO==3] <- "Obito por cancer"
+anos$ULTINFO[anos$ULTINFO==4] <- "Obito por outras causas, SOE"
+
+anos$TRATAMENTO = as.character(factor(anos$TRATAMENTO, levels = c("A","B","C","D","E","F","G","H","I","J"), labels(c("Cirurgia", "Radioterapia", "Quimioterapia", "Cirurgia + Radioterapia", "Cirurgia + Quimioterapia", "Radioterapia + Quimioterapia", "Cirurgia + Radio + Quimio", "Cirurgia + Radio + Quimio + Hormonio", "Outras combinações de tratamento", "Nenhum tratamento realizado")))) 
+anos$TRATAMENTO[anos$TRATAMENTO=="A"] <- "Cirurgia"
+anos$TRATAMENTO[anos$TRATAMENTO=="B"] <- "Radioterapia"
+anos$TRATAMENTO[anos$TRATAMENTO=="C"] <- "Quimioterapia"
+anos$TRATAMENTO[anos$TRATAMENTO=="D"] <- "Cirurgia + Radioterapia"
+anos$TRATAMENTO[anos$TRATAMENTO=="E"] <- "Cirurgia + Quimioterapia"
+anos$TRATAMENTO[anos$TRATAMENTO=="F"] <- "Radioterapia + Quimioterapia"
+anos$TRATAMENTO[anos$TRATAMENTO=="G"] <- "Cirurgia + Radio + Quimio"
+anos$TRATAMENTO[anos$TRATAMENTO=="H"] <- "Cirurgia + Radio + Quimio + Hormonio"
+anos$TRATAMENTO[anos$TRATAMENTO=="I"] <- "Outras combinações de tratamento"
+anos$TRATAMENTO[anos$TRATAMENTO=="J"] <- "Nenhum tratamento realizado"
+
+anos$TRATAMENTO[anos$TRATAMENTO=="1"] <- "Cirurgia"
+anos$TRATAMENTO[anos$TRATAMENTO=="2"] <- "Radioterapia"
+anos$TRATAMENTO[anos$TRATAMENTO=="3"] <- "Quimioterapia"
+anos$TRATAMENTO[anos$TRATAMENTO=="4"] <- "Cirurgia + Radioterapia"
+anos$TRATAMENTO[anos$TRATAMENTO=="5"] <- "Cirurgia + Quimioterapia"
+anos$TRATAMENTO[anos$TRATAMENTO=="6"] <- "Radioterapia + Quimioterapia"
+anos$TRATAMENTO[anos$TRATAMENTO=="7"] <- "Cirurgia + Radio + Quimio"
+anos$TRATAMENTO[anos$TRATAMENTO=="8"] <- "Cirurgia + Radio + Quimio + Hormonio"
+anos$TRATAMENTO[anos$TRATAMENTO=="9"] <- "Outras combinações de tratamento"
+anos$TRATAMENTO[anos$TRATAMENTO=="10"] <- "Nenhum tratamento realizado"
+
+
+
+############# PRIMEIRO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR SEXO ###############
+
+dtg1 <-group_by(anos, SEXO) %>%
+  summarise(sum(PCID))
+
+dtg1$TOTAL <- dtg1$`sum(PCID)`
+
+g1 <- ggplot(dtg1, aes(x = SEXO, y = TOTAL, 
+                       fill = factor(TOTAL))) +
+  geom_col(position = "dodge")+
+  geom_label(aes(label = `sum(PCID)`))+
+  scale_fill_manual(values=c("#00BFFF",
+                             "#FF8C00"))+
+  labs(title = "Total de pacientes com câncer dividido por sexo",
+       x = "Sexo", 
+       y = "Total de pacientes")+
+  theme_test()
+g1
+
+ggplotly(g1)
+
+
+
+---------------------------------------------------------------------------------------
+  
+  
+  ############# SEGUNDO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ANO ###############
+
+dtg2 <-group_by(anos, ANODIAG, SEXO) %>%
+  summarise(sum(PCID))
+
+dtg2$TOTAL <- dtg2$`sum(PCID)`
+
+g2 <- ggplot(dtg2, aes(x = ANODIAG, y = `sum(PCID)`, fill = factor(SEXO))) +
+  geom_col(colour = "#F0F8FF", position = "stack") + 
+  scale_fill_manual(values=c("#00BFFF",
+                             "#FF8C00"))+
+  labs(title = "Total de pacientes com câncer durante o período de 2000 a 2022",
+       x = "Anos", 
+       y = "Total de pacientes")+
+  theme_test()
+ggplotly(g2)
+
+
+-----------------------------------------------------------------------------
+  
+  ############# TERCEIRO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ESCOLARIDADE ###############
+
+dtg3 <-group_by(anos, ESCOLARI) %>%
+  summarise(sum(PCID))
+dtg3$TOTAL <- dtg3$`sum(PCID)`
+
+g3 <- ggplot(dtg3, aes(x = ESCOLARI, y = TOTAL, fill = factor(ESCOLARI))) +
+  geom_bar(position = "dodge", stat='identity')+ 
+  labs(title = "Total de pacientes com câncer por Escolaridade",
+       x = "Escolaridade", 
+       y = "Total de pacientes")
+
+ggplotly(g3+ scale_fill_brewer(palette = "BrBG"))
+
+############# QUARTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ESPECIALIDADE ###############
+
+dtg4 <-group_by(anos, CLINICA) %>%
+  summarise(sum(PCID))
+dtg4$TOTAL <- dtg4$`sum(PCID)`
+
+g4 <- ggplot(dtg4, aes(x = CLINICA, y = TOTAL, fill = factor(CLINICA))) +
+  geom_bar(position = "dodge", stat='identity')+ 
+  labs(title = "Total de pacientes com câncer por Especialidade",
+       x = "Especialidade", 
+       y = "Total de pacientes")
+
+ggplotly(g4+ scale_fill_brewer(palette = "BrBG"))
+
+############# QUINTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR CATEGORIA DE ATENDIMENTO ###############
+
+dtg5 <-group_by(anos, CATEATEND) %>%
+  summarise(sum(PCID))
+dtg5$TOTAL <- dtg5$`sum(PCID)`
+
+g5 <- ggplot(dtg5, aes(x = CATEATEND, y = TOTAL, fill = factor(CATEATEND))) +
+  geom_col(colour = "#F0F8FF", position = "stack") + 
+  scale_fill_manual(values=c("#FFE4B5",
+                             "#F0E68C",
+                             "#FFA500",
+                             "#FF8C00"))+
+  labs(title = "Total de pacientes com câncer atendidos por Categoria",
+       x = "Categoria de atendimento", 
+       y = "Total de pacientes")+
+  theme_test()
+ggplotly(g5)
+
+############# SEXTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR NÃO ATENDIMENTO ###############
+
+dtg6 <-group_by(anos, NAOTRAT) %>%
+  summarise(sum(PCID))
+dtg6$TOTAL <- dtg6$`sum(PCID)`
+
+g6 <- ggplot(dtg6, aes(x = NAOTRAT, y = TOTAL, fill = factor(NAOTRAT))) +
+  geom_col(colour = "#F0F8FF", position = "stack") + 
+  scale_fill_brewer(palette = "YlOrBr")+
+  labs(title = "Total de pacientes com câncer por Não Atendimento",
+       x = "Motivo para não atendimento", 
+       y = "Total de pacientes")+
+  theme_test()
+ggplotly(g6)
+
+############# SÉTIMO GRÁFICO - ÚLTIMA INFORMAÇÃO DO PACIENTE ###############
+
+dtg7 <-group_by(anos, ULTINFO) %>%
+  summarise(sum(PCID))
+dtg7$TOTAL <- dtg7$`sum(PCID)`
+
+g7 <- ggplot(dtg7, aes(x = ULTINFO, y = TOTAL, fill = factor(ULTINFO))) +
+  geom_col(colour = "#F0F8FF", position = "stack") + 
+  scale_fill_brewer(palette = "YlOrBr")+
+  labs(title = "Total de pacientes com câncer por Não Atendimento",
+       x = "Motivo para não atendimento", 
+       y = "Total de pacientes")+
+  theme_test()
+ggplotly(g7)
+
+
+############# ÓITAVO GRÁFICO - TRATAMENTO ###############
+
+dtg8 <-group_by(anos, TRATAMENTO) %>%
+  summarise(sum(PCID))
+dtg8$TOTAL <- dtg8$`sum(PCID)`
+
+g8 <- ggplot(dtg8, aes(x = TRATAMENTO, y = TOTAL, fill = factor(TRATAMENTO))) +
+  geom_col(colour = "#F0F8FF", position = "stack") + 
+  scale_fill_brewer(palette = "YlOrBr")+
+  labs(title = "Total de pacientes com câncer - Tratamento",
+       x = "Tratamento", 
+       y = "Total de pacientes")+
+  theme_test()
+ggplotly(g8)
+
+
+########################################################################
+###                                                                  ###
+###                           TRATAMENTO                             ###
+###                                                                  ###
+########################################################################
+
+dfmodel <- dados
+dfmodel <- filter(dfmodel, IDADE > 12)
+
+# Excluindo algumas variáveis:
+dfmodel <- subset(dfmodel, select = -c(CICI,CICIGRUP,CICISUBGRU,CIDADE,DTCONSULT,DTDIAG,DIAGPREV,OUTRACLA,BASEDIAG,CONSDIAG,DTTRAT,DTULTINFO,ULTINFO,ANODIAG,TRATHOSP,INSTORIG,TRATFANTES,TRATFAPOS,IBGEATEN,HABILIT,HABIT11,HABILIT1,HABILIT2,DRS,RRAS,PERDASEG,DTRECIDIVA,CIDADEH))
+
+# Alterando a posição da variável de saída:
+dfmodel <-dfmodel%>%relocate(TRATAMENTO, .after = DSCCIDO)
+
+# Verificando se existe valores inconsistentes
+is.null(dfmodel$UFNASC)
+sum(is.na(dfmodel$UFNASC))
+
+is.null(dfmodel$UFRESI)
+sum(is.na(dfmodel$UFRESI))
+
+is.null(dfmodel$TOPO)
+sum(is.na(dfmodel$TOPO))
+
+is.null(dfmodel$TOPOGRUP)
+sum(is.na(dfmodel$TOPOGRUP))
+
+is.null(dfmodel$DESCTOPO)
+sum(is.na(dfmodel$DESCTOPO))
+
+is.null(dfmodel$DESCMORFO)
+sum(is.na(dfmodel$DESCMORFO))
+
+is.null(dfmodel$EC)
+sum(is.na(dfmodel$EC))
+
+is.null(dfmodel$ECGRUP)
+sum(is.na(dfmodel$ECGRUP))
+
+is.null(dfmodel$T)
+sum(is.na(dfmodel$T))
+
+is.null(dfmodel$N)
+sum(is.na(dfmodel$N))
+
+is.null(dfmodel$M)
+sum(is.na(dfmodel$M))
+
+is.null(dfmodel$PT)
+sum(is.na(dfmodel$PN))
+
+is.null(dfmodel$PM)
+sum(is.na(dfmodel$PM))
+
+is.null(dfmodel$META01)
+sum(is.na(dfmodel$META01))
+
+is.null(dfmodel$META02)
+sum(is.na(dfmodel$META02))
+
+is.null(dfmodel$META03)
+sum(is.na(dfmodel$META03))
+
+is.null(dfmodel$META04)
+sum(is.na(dfmodel$META04))
+
+is.null(dfmodel$TRATAMENTO)
+sum(is.na(dfmodel$TRATAMENTO))
+
+is.null(dfmodel$FAIXAETAR)
+sum(is.na(dfmodel$FAIXAETAR))
+
+is.null(dfmodel$DSCCIDO)
+sum(is.na(dfmodel$DSCCIDO))
+
+# Percentual de dados faltantes:
+round(colSums(is.na(dfmodel))*100/nrow(dfmodel), 2)
+
+# TRATCONS= 8,52% - (Os valores faltantes serão substituídos pela média)
+# DIAGTRAT = 8,55% - (Os valores faltantes serão substituídos pela média)
+# DESCTOPO = 2,36% - (Os valores faltantes serão substituídos pela média)
+# DESCMORFO = 1,99% - (Os valores faltantes serão substituídos pela média)
+# PT = 56,63% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# PN = 57,11% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# PM = 59,62% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# META01 = 86,55% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# META02 = 95,65% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# META03 = 98,50% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# META04 = 99,53% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# REC01 = 93,52% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# REC02 = 98,02% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# REC03 = 99,33% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# REC04 = 99,80% -(Como temos mais de 50% de dados faltantes, iremos descartar esta variável.)
+# DSCCIDO = 0,10% - (Os valores faltantes serão substituídos pela média)
+
+dfmodel$PT <- NULL
+dfmodel$PN <- NULL
+dfmodel$PM <- NULL
+dfmodel$META01 <- NULL
+dfmodel$META02 <- NULL
+dfmodel$META03 <- NULL
+dfmodel$META04 <- NULL
+dfmodel$REC01 <- NULL
+dfmodel$REC02 <- NULL
+dfmodel$REC03 <- NULL
+dfmodel$REC04 <- NULL
+
+# Verificando valores únicos
+unique(dfmodel$UFNASC)
+unique(dfmodel$UFRESID)
+unique(dfmodel$TOPO)
+unique(dfmodel$TOPOGRUP)
+unique(dfmodel$DESCTOPO)
+unique(dfmodel$DESCMORFO)
+unique(dfmodel$EC)
+unique(dfmodel$ECGRUP)
+unique(dfmodel$T)
+unique(dfmodel$N)
+unique(dfmodel$M)
+unique(dfmodel$PT)
+unique(dfmodel$PN)
+unique(dfmodel$PM)
+unique(dfmodel$META01)
+unique(dfmodel$META02)
+unique(dfmodel$META03)
+unique(dfmodel$META04)
+unique(dfmodel$TRATAMENTO)
+unique(dfmodel$FAIXAETAR)
+unique(dfmodel$DSCCIDO)
+unique(dfmodel$REC01)
+unique(dfmodel$REC02)
+unique(dfmodel$REC03)
+unique(dfmodel$REC04)
+
+#SUbstituindo dados categóricos
+
+dfmodel$UFNASC = as.numeric(factor(dfmodel$UFNASC, levels = c("SP","BA","MG","PI","SI","CE","PE","PR","MS","RS","AL","OP","GO","RN","PB","SE","SC","PA","ES","RJ","MA","MT","AM","TO","DF","AC","RO","AP","RR"), labels(c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28))))
+dfmodel$UFRESID = as.numeric(factor(dfmodel$UFRESID, levels = c("SP","MG","GO","PR","OP","MS","MT","RJ","DF","CE","PE","SC","BA","RS","RO","ES","PA","MA","AC","AM","SE","TO","AL","RN","PB","PI","AP","RR"), labels(c(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27))))
+dfmodel$TOPO = as.numeric(factor(dfmodel$TOPO, levels = c("C447","C773","C443","C679","C446","C445","C209","C448","C441","C001","C049","C163","C760","C444","C169","C619","C329","C508","C449", "C440", "C809", "C509", "C739", "C421", "C154", "C519", "C079", "C159", "C501", "C184", "C506", "C678", "C162", "C442", "C504", "C559", "C031", "C569", "C050","C539", "C187", "C772", "C710", "C051", "C420", "C602", "C168", "C099", "C774", "C343", "C199", "C349", "C109", "C770",
+                                                          "C480","C503","C241","C250","C690","C021","C080","C320","C500","C239", "C069", "C211", "C119", "C180", "C028", "C165", "C062", "C029","C341","C189","C155","C492","C764", "C502", "C549", "C601", "C505", "C182", "C413", "C170", "C151", "C672", "C019", "C779", "C251", "C490","C158","C161","C649","C482", "C670", "C039", "C384", "C491","C185","C139","C529","C600","C765","C762","C541","C258","C411","C160",
+                                                          "C674","C259","C102","C340", "C300", "C310", "C048","C129","C000","C179", "C321", "C609", "C410", "C030","C005", "C248","C186","C673","C511","C530","C719","C220", "C181", "C020", "C060", "C006", "C543", "C659", "C693", "C419", "C131", "C493", "C761", "C221", "C009", "C348","C778","C775","C540","C052", "C218", "C402", "C183", "C495", "C090", "C767", "C499", "C068", "C172", "C518", "C675", "C164", "C671", "C669",
+                                                          "C696","C089","C423","C002", "C091", "C481","C153","C252", "C240", "C424", "C383", "C113", "C608", "C023", "C166", "C676", "C138", "C510","C210","C538","C680","C249", "C108", "C269", "C178", "C711", "C414", "C152", "C698", "C040", "C301", "C401", "C579", "C637", "C130", "C342","C531","C058","C403","C494", "C496", "C257","C328", "C699","C620", "C061", "C059", "C412", "C712", "C400", "C118", "C212", "C318", "C638",
+                                                          "C718","C150","C319","C717", "C729", "C629","C004", "C763", "C022", "C720", "C542", "C008", "C408", "C041", "C188", "C253", "C103", "C379","C695","C101","C148","C081", "C260", "C003", "C700", "C691", "C771", "C639", "C140", "C409", "C268", "C422", "C381", "C311", "C713", "C100","C632","C132","C173","C621", "C724", "C750", "C322", "C323", "C399", "C714", "C472", "C098", "C716", "C339", "C382", "C512", "C694", "C572",
+                                                          "C548","C111","C171","C024","C110","C112","C749", "C570", "C498", "C471", "C488", "C740", "C475", "C390", "C754", "C759","C768","C577","C418","C751","C741","C312", "C313","C470","C677","C088","C574","C473", "C380", "C688", "C709", "C692", "C755", "C141", "C478", "C752","C578","C715","C388","C631","C474","C254","C753","C142","C479","C689", "C728", "C701", "C725", "C589", "C721", "C476", "C723", "C630","C573","C758",
+                                                          "C398","C681","C104","C722","C571"), labels = c(seq.int(1:331))))
+dfmodel$TOPOGRUP = as.numeric(factor(dfmodel$TOPOGRUP, levels = c("C44", "C77", "C67", "C20", "C00", "C04", "C16", "C76", "C61", "C32", "C50", "C80", "C73", "C42", "C15", "C51", "C07", "C18", "C55", "C03", "C56", "C05", "C53", "C71", "C60", "C09", "C34", "C19", "C10","C48", "C24", "C25", "C69", "C02", "C08", "C23", "C06","C21", "C11", "C49", "C54", "C41", "C17", "C01", "C64", "C38", "C13", "C52", "C30", "C31", "C12", "C22","C65", "C40", "C66", "C68", "C26", "C57","C63", 
+                                                                  "C62", "C72", "C37", "C14", "C70", "C75", "C39", "C47", "C33", "C74", "C58"), labels = c(seq.int(1:70))))
+dfmodel$DESCTOPO = as.numeric(factor(dfmodel$DESCTOPO, levels = c("PELE DO QUADRIL E MEMBROS INFERIORES","LINFONODOS DA AXILA E DO MEMBRO SUPERIOR","PELE DE OUTRAS PARTES E DE PARTES NAO ESPECIFICADAS DA FACE","BEXIGA SOE","PELE DO OMBRO E MEMBROS SUPERIORES","PELE DO TRONCO","RETO SOE","LESAO SOBREPOSTA DA PELE","PALPEBRA", "LABIO INFERIOR EXTERNO", "ASSOALHO DA BOCA SOE ","ESTOMAGO ANTRO GASTRICO","CABECA FACE E PESCOCO SOE","PELE DO COURO CABELUDO E DO PESCOCO",
+                                                                  "ESTOMAGO SOE","PROSTATA","LARINGE SOE","MAMA LESAO SOBREPOSTA DA","PELE SOE EXCLUI PELE DA VULVA C51 DO PENIS C609 E DO ESCROTO C632","PELE DO LABIO SOE","LOCALIZACAO PRIMARIA DESCONHECIDA","MAMA SOE EXCLUI PELE DA MAMA C445","GLANDULA TIREOIDE","MEDULA OSSEA","SOFAGO TERCO MEDIO DO","VULVA  SOE","GLANDULA PAROTIDA", "ESOFAGO SOE","MAMA PORCAO CENTRAL DA",                                                        
+                                                                  "COLON TRANSVERSO","MAMA PORCAO AXILAR DA","BEXIGA LESAO SOBREPOSTA DA","ESTOMAGO CORPO DO","OUVIDO EXTERNO","MAMA QUADRANTE SUPERIOR EXTERNO DA","UTERO SOE","GENGIVA INFERIOR","OVARIO","PALATO DURO","COLO DO UTERO","COLON SIGMOIDE", "LINFONODOS INTRAABDOMINAIS","CEREBRO","PALATO MOLE SOE","SANGUE","PENIS CORPO DO","ESTOMAGO LESAO SOBREPOSTA DO","AMIGDALA SOE EXCLUI AMIGDALA LINGUAL C024 E AMIGDALA",                          
+                                                                  "LINFONODOS DA REGIAO INGUINAL E DO MEMBRO INFERIOR","PULMAO LOBO INFERIOR DO","JUNCAO RETOSSIGMOIDIANA","PULMAO SOE","OROFARINGE SOE","LINFONODOS DA CABECA FACE E PESCOCO","RETROPERITONIO", "MAMA QUADRANTE INFERIOR INTERNO DA","AMPOLA DE VATER","PANCREAS CABECA DO","CONJUNTIVA","LINGUA BORDA DA","GLANDULA SUBMANDIBULAR","GLOTE","MAMA MAMILO","VESICULA BILIAR","BOCA SOE","CANAL ANAL","NASOFARINGE SOE",
+                                                                  "CECO","LINGUA LESAO SOBREPOSTA DA","ESTOMAGO PEQUENA CURVATURA  SOE", "AREA RETROMOLAR","LINGUA SOE","PULMAO LOBO SUPERIOR DO","COLON SOE","ESOFAGO TERCO INFERIOR DO","TEC CONJUNTIVOSUBCUTANEO E OUTROS TECIDOS MOLES DO MEMBRO INFERIOR E QUADRIL","MEMBRO SUPERIOR SOE","MAMA QUADRANTE SUPERIOR INTERNO DA","CORPO DO UTERO","GLANDE","MAMA QUADRANTE INFERIOR EXTERNO DA", "COLON ASCENDENTE","COSTELAS ESTERNO CLAVICULA E RESPECTIVAS ARTICULACOES",
+                                                                  "DUODENO","ESOFAGO TORACICO","BEXIGA PAREDE LATERAL DA","LINGUA BASE DA","LINFONODO SOE","PANCREAS CORPO DO","TEC CONJUNTIVOSUBCUTANEO E OUTROS TECIDOS MOLES DA CABECA FACE E PESCOCO","ESOFAGO LESAO SOBREPOSTA DO","ESTOMAGO FUNDO DO","RIM SOE","PERITONIO SOE","BEXIGA TRIGONO DA,GENGIVA SOE","PLEURA SOE","TEC CONJUNTIVOSUBCUTANEO E OUTROS TECIDOS MOLES DOS MEMBROS SUPERIORES E OMBRO","COLON ANGULO ESPLENICO DO","HIPOFARINGE SOE","VAGINA SOE",
+                                                                  "PREPUCIO", "MEMBRO INFERIOR SOE","ABDOME SOE","ENDOMETRIO","PANCREAS LESAO SOBREPOSTA DO","MANDIBULA","CARDIA SOE,BEXIGA PAREDE POSTERIOR DA","PANCREAS SOE,OROFARINGE PAREDE LATERAL DA","BRONQUIO PRINCIPALCAVIDADE NASAL EXCLUI NARIZ SOE C760","SEIO MAXILAR","ASSOALHO DA BOCA LESAO SOBREPOSTA DO", "SEIO PIRIFORME","LABIO SUPERIOR EXTERNO","INTESTINO DELGADO SOE","SUPRAGLOTE","PENIS SOE","OSSOS DO CRANIO E DA FACE E RESPECTIVAS ARTICULACOES EXCLUI MANDIBULA C411",
+                                                                  "GENGIVA SUPERIOR","LABIO MUCOSA SOE","VIAS BILIARES LESAO SOBREPOSTA DAS","COLON DESCENDENTE","BEXIGA PAREDE ANTERIOR DA","PEQUENOS LABIOS","ENDOCERVIX","ENCEFALO SOE","FIGADO","APENDICE VERMIFORME","LINGUA SUPERFICIE DORSAL DA LINGUA SOE","MUCOSA DA BOCHECHA","LABIO COMISSURA LABIAL","UTERO FUNDO DO","PELVE RENAL","COROIDE","OSSOS SOE","FACE HIPOFARINGEA DA PREGA ARIEPIGLOTICA PREGA ARIEPIGLOTICA SOE","TEC CONJUNTIVOSUBCUTANEO E OUTROS TECIDOS MOLES DO TORAX",
+                                                                  "TORAX SOE","VIAS BILIARES INTRAHEPATICAS","LABIO SOE EXCLUI PELE DO LABIO C440","PULMAO LESAO SOBREPOSTA DO","LINFONODOS DE MULTIPLAS REGIOES","LINFONODOS PELVICOS","ISTMO DO UTERO","UVULA","LESAO SOBREPOSTA DO RETO ANUS E CANAL ANAL","OSSOS LONGOS DOS MEMBROS INFERIORES E RESPECTIVAS ARTICULACOES", "COLON ANGULO HEPATICO DO","TEC CONJUNTIVOSUBCUTANEO E OUTROS TECIDOS MOLES DA PELVE","MIGDALA FOSSA AMIGDALIANA","OUTRAS LOCALIZACOES MAL DEFINIDAS",
+                                                                  "TECIDO CONJUNTIVO SUBCUTANEO E OUTROS TECIDOS MOLES SOE","LESAO SOBREPOSTA DE OUTRAS PARTES E DE PARTES NAO ESPECIFICADAS DA BOCA","ILEO EXCLUI VALVULA ILEOCECAL C180","VULVA LESAO SOBREPOSTA DA","BEXIGA COLO DA","ESTOMAGO PILORO","BEXIGA CUPULA DA","URETER","ORBITA SOE","GLANDULA SALIVAR MAIOR SOE","SISTEMA RETICULOENDOTELIAL SOE,LABIO EXTERNO SOE","AMIGDALA PILAR AMIGDALIANO","PERITONIO PARTES ESPECIFICADAS DO","ESOFAGO TERCO SUPERIOR DO",
+                                                                  "PANCREAS CAUDA DO,VIAS BILIARES EXTRAHEPATICAS","SISTEMA HEMATOPOIETICO SOE","MEDIASTINO SOE","NASOFARINGE PAREDE ANTERIOR DA","PENIS LESAO SOBREPOSTA DO","LINGUA DOIS TERCOS ANTERIORES SOE","ESTOMAGO GRANDE CURVATURA SOE","ORIFICIO URETERAL","HIPOFARINGE LES\xc7O SOBREPOSTA DA","GRANDES LABIOS","ANUS SOE  EXCLUI PELE DO ANUS E PELE PERIANAL C445","COLO DO UTERO LESAO SOBREPOSTA DO","URETRA","VIA BILIAR SOE","OROFARINGE LES\xc7O SOBREPOSTA DA",
+                                                                  "TRATO GASTROINTESTINAL SOE","INTESTINO DELGADO LESAO SOBREPOSTA DO","LOBO FRONTAL","OSSOS PELVICOS SACRO COCCIX E RESPECTIVAS ARTICULACOES","ESOFAGO ABDOMINAL","OLHO E ANEXOS LESAO SOBREPOSTA DO","ASSOALHO ANTERIOR DA BOCA","OUVIDO MEDIO","OSSOS CURTOS DOS MEMBROS SUPERIORES E RESPECTIVAS ARTICULACOES","TRATO GENITAL FEMININO  SOE","OUTROS ORGAOS GENITAIS MASCULINOS ESPECIFICADOS","REGIAO POSCRICOIDEA","PULMAO LOBO MEDIO DO","EXOCERVIX",
+                                                                  "PALATO LESAO SOBREPOSTA DO","OSSOS CURTOS DOS MEMBROS INFERIORES E RESPECTIVAS ARTICULACOES","TEC CONJUNTIVOSUBCUTANEO E OUTROS TECIDOS MOLES DO ABDOME","TEC CONJUNTIVOSUBCUTANEO E OUTROS TECIDOS MOLES DO TRONCO","LARINGE LESAO SOBREPOSTA DA","OLHO SOE","TESTICULO CRIPTORQUIDICO COMO LOCAL DA NEOPLASIA","VESTIBULO DA BOCA","PALATO SOE","COLUNA VERTEBRAL EXCLUI SACRO E COCCIX C414","LOBO TEMPORAL","OMOPLATAESCAPULA OSSOS LONGOS DOS MEMBROS SUPERIORES RESPECTIVAS ARTICULACOES",
+                                                                  "NASOFARINGE LESAO SOBREPOSTA DA","ZONA CLOACOGENICA","SEIOS DA FACE LESAO SOBREPOSTA DOS","ORGAOS GENITAIS MASCULINOS LESAO SOBREPOSTA DOS ENCEFALO LESAO SOBREPOSTA DO","ESOFAGO CERVICAL", "SEIO DA FACE SOE","TRONCO CEREBRAL", "SISTEMA NERVOSO SOE", "TESTICULO  SOE","LABIO MUCOSA INFERIOR DO","PELVE SOE","LINGUA SUPERFICIE VENTRAL SOE","MEDULA ESPINHAL","MIOMETRIO","LABIO LESAO SOBREPOSTA DO","LESAO SOBREPOSTA DOS OSSOS ARTICULACAO E CARTILAGENS ARTICULACOES DOS MEMBROS",
+                                                                  "ASSOALHO LATERAL DA BOCA","COLON LESAO SOBREPOSTA DO","PANCREAS CANAL PANCREATICO","OROFARINGE PAREDE POSTERIOR DA","TIMO", "GLANDULA LACRIMAL","EPIGLOTE FACE ANTERIOR DA","LESAO SOBREPOSTA DO LABIO CAVIDADE ORAL E FARINGE","GLANDULA SUBLINGUAL","TRATO INTESTINAL SOE","LABIO MUCOSA SUPERIOR DO","MENINGES CEREBRAIS,CORNEA SOE", "LINFONODOS INTRATORACICOS","ORGAO GENITAL MASCULINO SOE", "FARINGE SOE","OSSOS DOS MEMBROS SOE","APARELHO DIGESTIVO LESAO SOBREPOSTA DO",
+                                                                  "BACO","MEDIASTINO ANTERIOR","SEIO ETMOIDAL","LOBO PARIETAL","VALECULA","ESCROTO SOE","HIPOFARINGE PAREDE POSTERIOR DA","DIVERTICULO DE MECKEL COMO LOCAL DA NEOPLASIA","TESTICULO TOPICO","NERVO ACUSTICO","GLANDULA PARATIREOIDE","SUBGLOTE","TESTICULO TOPICO","NERVO ACUSTICO","GLANDULA PARATIREOIDE","SUBGLOTE","LARINGE CARTILAGEM LARINGEA","LOCALIZACOES MAL DEFINIDAS DO APARELHO RESPIRATORIO","LOBO OCCIPITAL", "PERIFERICOS E SISTEMA NERVOSO AUTONOMO DO MEMBRO INFERIOR E DO QUADRIL",
+                                                                  "AMIGDALA LESAO SOBREPOSTA DA", "CEREBELO SOE","TRAQUEIA", "MEDIASTINO POSTERIOR", "CLITORIS","CORPO CILIAR", "LIGAMENTO REDONDO","CORPO DO UTERO LESAO SOBREPOSTA DO","NASOFARINGE PAREDE POSTERIOR DA","JEJUNO","LINGUA AMIGDALA LINGUAL","NASOFARINGE PAREDE SUPERIOR DA","NASOFARINGE PAREDE LATERAL DA","GLANDULA SUPRARENAL SOE","TROMPA DE FAL\xe0PIO","TECIDO CONECTIVO SUBCUTANEO E DE OUTROS TECIDOS MOLES LESAO SOBREPOSTA DO","NERVOS PERIFERICOS E SISTEMA NERVOSO AUTONOMO DO MEMBRO SUPERIOR E DO OMBRO",
+                                                                  "RETROPERITONIO E PERITONIO LESAO SOBREPOSTA DO","GLANDULA SUPRARENAL CORTEX DA","NERVOS PERIFERICOS E SISTEMA NERVOSO AUTONOMO DA PELVE","TRATO RESPIRATORIO SUPERIOR SOE","CORPO CAROTIDEO","GLANDULA ENDOCRINA SOE","LESAO SOBREPOSTA DE LOCALIZACOES MAL DEFINIDAS","ORGAOS GENITAIS FEMININOS OUTRAS PARTES ESPECIFICADAS DOS","LESAO SOBREPOSTA DE OSSOS ARTICULACOES E CARTILAGENS ARTICULARES","GLANDULA HIPOFISE","GLANDULA SUPRARENAL MEDULA DA",
+                                                                  "SEIO FRONTAL","SEIO ESFENOIDAL","NERVOS PERIFERICOS E SISTEMA NERVOSO AUTONOMO DA CABECAFACE E PESCOCO","URACO","LESAO SOBREPOSTA DE GLANDULAS SALIVARES MAIORES","ANEXOS UTERINOS","NERVOS PERIFERICOS E SISTEMA NERVOSO AUTONOMO DO TORAX","CORACAO","ORGAOS URINARIOS LESAO SOBREPOSTA DOS","MENINGES SOE","RETINA","CORPO AORTICO E OUTROS PARAGANGLIOS","LARINGOFARINGE","NERVOS PERIFERICOS E DO SISTEMA NERVOSO AUTONOMO LESAO SOBREPOSTA DOS",
+                                                                  "DUCTO CRANIOFARINGEO","ORGAOS GENITAIS FEMININOS LESAO SOBREPOSTA DOS","VENTRICULO CEREBRAL SOE","LESAO SOBREPOSTA DO CORACAO MEDIASTINO E PLEURA","CORDAO ESPERMATICO","NERVOS PERIFERICOS E SISTEMA NERVOSO AUTONOMO DO ABDOME","ILHOTAS DE LANGERHANS","GLANDULA PINEAL","ANEL DE WALDEYER","SISTEMA NERVOSO AUTONOMO SOE","APARELHO URINARIO SOE","LESAO SOBREPOSTA DO ENCEFALO E DO SISTEMA NERVOSO CENTRAL", "MENINGES ESPINHAIS","NERVO CRANIANO SOE", "PLACENTA","CAUDA EQUINA",
+                                                                  "NERVOS PERIFERICOS E SISTEMA NERVOSO AUTONOMO DO TRONCO","NERVO OPTICO","EPIDIDIMO","PARAMETRIO","LESOES SOBREPOSTAS DAS GLANDULAS ENDOCRINAS E ESTRUTURAS RELACIONADAS","LESAO SOBREPOSTA DO APARELHO RESPIRATORIO E DOS ORGAOS INTRATORACICOS","GLANDULA PARAURETRAL","FENDA BRANQUIAL LOCAL DA NEOPLASIA","NERVO OLFATORIO","LIGAMENTO LARGO"), labels = c(seq.int(1:326))))
+dfmodel$DESCMORFO = as.numeric(factor(dfmodel$DESCMORFO, levels = c("CARCINOMA BASOCELULAR SOE","LINFOMA MALIGNO DE LINFOCITOS PEQUENOS SOE","CARCINOMA ESCAMOCELULAR SOE","CARCINOMA DE CELULAS TRANSICIONAIS SOE","ADENOCARCINOMA SOE","EPITELIOMA MALIGNO","SARCOMA DE KAPOSI","CARCINOMA BASOCELULAR SUPERFICIAL MULTIFOCAL","CARCINOMA ESCAMOCELULAR IN SITU SOE","ADENOCARCINOMA TUBULAR","CARCINOMA SOE","CARCINOMA DE CELULAS ESCAMOSAS SOE","CARCINOMA DE CELULAS ACINOSAS","CARCINOMA BASOCELULAR NODULAR","CARCINOMA DUCTAL INFILTRANTE SOE","CARCINOMA BASOCELULAR INFILTRATIVO SOE","CARCINOMA DE CELULAS EM ANEL DE SINETE",
+                                                                    "CARCINOMA PAPILAR SOE","NEOPLASIA MALIGNA","DOENCA DE BOWEN","CARCINOMA BASOESCAMOSO","LEUCEMIA MIELOMONOCITICA CRONICA SOE","CARCINOMA PSEUDOSARCOMATOSO","LEUCEMIA MIELOIDE AGUDA COM DISPLASIA DE MULTILINHAGEM","CARCINOMA DUCTAL INFILTRANTE E LOBULAR","GRANULOMA DE HODGKIN","LEUCEMIA LINFOBLASTICA AGUDA SOE","CARCINOMA DE CELULAS DE TRANSICAO PAPILAR NAO INVASIVO","MIELOMA MULTIPLO","TUMOR ESTROMAL GASTROINTESTINAL SOE","CARCINOSSARCOMA SOE","CISTADENOCARCINOMA SEROSO SOE","LINFOMA MALIGNO NAOHODGKIN SOE","CARCINOMA METATIPICO",                                                           
+                                                                    "CARCINOMA ESCAMOSO CERATINIZADO SOE","EPENDIMOMA ANAPLASICO,CARCINOMA LOBULAR SOE","ANGIOMIOSSARCOMA,CARCINOMA ANAPLASICO SOE","CARCINOMA DE CELULAS DE MERKEL","SINDROME MIELODISPLASICA SOE","MELANOMA MALIGNO SOE","ADENOCARCINOMA TIPO INTESTINAL","CARCINOMA DE CELULAS PEQUENAS E DE CELULAS GRANDES","LINFOMA MALIGNO DE CELULAS GRANDES DIFUSO SOE","LIPOSSARCOMA BEM DIFERENCIADO","CARCINOMA VERRUCOSO SOE","CARCINOMA PAPILAR DE CELULAS TRANSICIONAIS","TUMOR MALIGNO TIPO DE CELULAS FUSIFORMES","CARCINOMA ESCAMOSO DE CELULAS FUSIFORMES",
+                                                                    "NEOPLASIA INTRAEPITELIAL GLANDULAR GRAU III","CARCINOMA BASOCELULAR TIPO MORFEIA","CARCINOMA ESCAMOSO BASALOIDE","CARCINOMA BASAL ADENOIDE","CARCINOMA CLOACOGENICO","DENOCARCINOMA MUCINOSO","LINFOMA MALIGNO MISTO DE CELULAS PEQUENAS CLIVADAS E CELULAS GRANDES FOLICULAR","TRICOLEMOCARCINOMA","LEUCEMIA MEGACARIOBLASTICA AGUDA","CARCINOMA MUCOEPIDERMOIDE","ADENOCARCINOMA FOLICULAR SOE","CARCINOMA TIPO DIFUSO","CARCINOMA BASOCELULAR FIBROEPITELIAL","CARCINOMA INDIFERENCIADO SOE","CARCINOMA ESCAMOSO MICROINVASOR","LINFOMA MALIGNO SOE",                                                            
+                                                                    "SARCOMA FUSOCELULAR","CARCINOMA ADENOIDE CISTICO","LEUCEMIA LINFOCITICA CRONICA","MELANOMA NODULAR","CARCINOMA DE CELULAS NAO PEQUENAS","CARCINOMA IN SITU CRIBRIFORME","HEMANGIOSSARCOMA","DOENCA LINFOPROLIFERATIVA SOE","LINFOMA MALIGNO LINFOCITICO DIFERENCIACAO INTERMEDIARIA DIFUSO","ADENOCARCINOMA DE CELULAS CLARAS SOE","TROMBOCITEMIA ESSENCIAL","MESOTELIOMA MALIGNO","CARCINOMA OAT CEL","CARCINOMA DUCTAL INFILTRATIVO MISTO COM OUTROS TIPOS DE CARCINOMA","HISTIOCITOMA FIBROSO ATIPICO","CARCINOMA DUCTULAR INFILTRANTE","CARCINOMA FUSOCELULAR SOE",
+                                                                    "ADENOCARCINOMA VILOSO","LEIOMIOSSARCOMA SOE","NEOPLASIA INTRAEPITELIAL GRAU III DE COLO UTERINO VULVA E VAGINA","CARCINOMA DE CELULAS PEQUENAS SOE","ADENOCARCINOMA APOCRINO","MELANOMA EM LENTIGO MALIGNO","ADENOFIBROMA ENDOMETRIOIDE MALIGNO","CISTADENOCARCINOMA MUCINOSO PAPILAR","CARCINOMA BASOCELULAR MULTICENTRICO","CARCINOMA IN SITU DE C\x90LULAS ESCAMOSAS SOE","ADENOCARCINOMA PRODUTOR DE MUCINA", "ADENOCARCINOMA ENDOMETRIOIDE SOE","ADENOCARCINOMA IN SITU SOE","LINFOMA DE ZONA MARGINAL TIPO CELULAS B SOE","MELANOMA LENTIGINOSO MALIGNO DAS EXTREMIDADES",                                  
+                                                                    "HISTIOCITOMA FIBROSO MALIGNO","SARCOMA DE EWING","ADENOCARCINOMA EM ADENOMA TUBULOVILOSO","CARCINOMA NEUROENDOCRINO SOE","SARCOMA SOE","CISTADENOCARCINOMA PAPILAR SEROSO","LEUCEMIA MIELOIDE AGUDA","GLIOBLASTOMA SOE","DOENCA MIELOPROLIFERATIVA SOE","LEUCEMIA MIELOIDE CRONICA","CARCINOMA IN SITU SOE","LINFOMA MALIGNO FOLICULAR SOE","MELANOMA LENTIGINOSO DE MUCOSA","MELANOMA IN SITU","DOENCA DE PAGET EXTRAMAMARIA EXCETO DOENCA DE PAGET DO OSSO","LIPOSSARCOMA PLEOMORFICO","CARCINOMA CRIBRIFORME SOE","CARCINOMA METAPLASICO SOE","CARCINOMA HEPATOCELULAR SOE",
+                                                                    "LINFOMA DE CELULAS GRANDES KI1","LEUCEMIA MIELOIDE AGUDA COM DIFERENCIACAO MINIMA","CARCINOMA ESCAMOCELULAR PAPILAR","ADENOCARCINOMA BASOCELULAR","MICOSE FUNGOIDE","CELULAS TUMORAIS INCERTO SE BENIGNAS OU MALIGNAS","CARCINOMA PILOMATRICIAL MALIGNO","LEUCEMIA SOE","OSTEOSSARCOMA CONDROBLASTICO","LINFOMA MALIGNO IMUNOBLASTICO SOE","TUMOR CARCINOIDE SOE EXCETO DO APENDICE M82401","ADENOCARCINOMA ALVEOLAR","CARCINOMA INFLAMATORIO","CARCINOMA DE CELULAS RENAIS SOE","CARCINOMA MEDULAR SOE","LEUCEMIA AGUDA SOE","LINFOMA MALIGNO DE CELULAS PEQUENAS CLIVADAS FOLICULAR",
+                                                                    "ADENOCARCINOMA DE GLANDULAS DA REGIAO ANAL","CARCINOMA INTRADUCTAL NAO INFILTRANTE SOE","DOEN\x80A DE HODGKIN ESCLEROSE NODULAR SOE","COLANGIOCARCINOMA,SARCOMA SINOVIAL SOE","ADENOCARCINOMA BRONQUIOLOALVEOLAR SOE","ADENOCARCINOMA PAPILAR INTRADUCTAL COM INVASAO","TROMBOCITEMIA IDIOPATICA", "DOEN\x80A DE HODGKIN SOE","LINFOMA DE BURKITT SOE","DOENCA DE PAGET E CARCINOMA DUCTAL INFILTRANTE DA MAMA","SARCOMA ESTROMAL GASTROINTESTINAL","NEOPLASIA DE CELULAS TRANSICIONAIS PAPILAR DE BAIXO POTENCIAL DE MALIGNIDADE","TUMOR MALIGNO DE CELULAS DA GRANULOSA",
+                                                                    "CARCINOMA DUCTAL IN SITU TIPO SOLIDO","CARCINOMA ESCAMOSO ADENOIDE","LINFOMA MALIGNO DE CELULAS GRANDES FOLICULAR SOE","SARCOMA DE CELULAS GIGANTES EXCETO DE OSSO M92503","LINFOMA MALIGNO MISTO DE CELULAS PEQUENAS E GRANDES DIFUSO","MELANOMA DE PROPAGACAO SUPERFICIAL","ADENOCARCINOMA PAPILAR SOE","DOENCA DE PAGET E CARCINOMA INTRADUCTAL DA MAMA", "CARCINOMA PAPILAR IN SITU","CARCINOMA ESCAMOSO TIPO CELULAS CLARAS","ADENOCARCINOMA COM SUBTIPOS MISTOS","CARCINOMA DE CELULAS TRANSICIONAIS IN SITU","TUMOR FILODES MALIGNO","CARCINOMA SOLIDO SOE",                                                           
+                                                                    "MELANOMA MALIGNO EM REGRESSAO","CARCINOMA DE CELULAS GRANDES SOE","CARCINOMA DE CELULAS DE TRANSICAO MICROPAPILAR","LEUCEMIA LINFOIDE SOE","MIXOSSARCOMA","LEUCEMIA MIELOIDE SOE","ANEMIA REFRATARIA COM EXCESSO DE BLASTOS","EFELIDE OU LENTIGO MELANOTICO DE HUTCHINSON SOE","CARCINOMA BASALOIDE","ADENOCARCINOMA ENDOMETRIOIDE TIPO SECRETOR","CARCINOMA LOBULAR INFILTRANTE MISTO COM OUTROS TIPOS DE CARCINOMA","ADENOSSARCOMA","MICROCARCINOMA PAPILAR","ADENOCARCINOMA IN SITU EM POLIPO ADENOMATOSO","FIBROSSARCOMA SOE","GLIOMA MALIGNO","CORDOMA","DERMATOFIBROSSARCOMA SOE",
+                                                                    "LEUCEMIA MIELOMONOCITICA AGUDA","MELANOMA AMELANOTICO","ADENOCARCINOMA PAPILAR INTRADUCTAL NAO INFILTRANTE","MELANOMA DE CELULAS EPITELIOIDES","LINFOMA DE CELULAS T ANGIOCENTRICO","DOENCA DE PAGET MAMARIA","MELANOMA MALIGNO EM NEVO JUNCIONAL","ANEMIA REFRATARIA SOE","LINFOMA MALIGNO DIFUSO SOE","LEUCEMIA PROLINFOCITICA","ASTROCITOMA SOE","CARCINOMA DE CELULAS GIGANTES E FUSOCELULAR","CITOPENIA REFRATARIA COM DISPLASIA MULTILINHAGEM","DOEN\x80A DE HODGKIN ESCLEROSE NODULAR PREDOMINANCIA LINFOCITICA","RABDOMIOSSARCOMA SOE","LIPOSSARCOMA DE CELULAS REDONDAS",                                               
+                                                                    "ANEMIA REFRATARIA","MACROGLOBULINEMIA DE WALDENSTROM","ADENOMA BRONQUICO SOE","LINFOMA COMPOSTO: HODGKIN E NAOHODGKIN","CARCINOMA NEUROENDOCRINO","CARCINOMAS DE CELULAS GRANDES SOE","TUMOR NEUROECTODERMICO PERIFERICO","POROMA ECRINO MALIGNO","CARCINOIDE TUBULAR","CARCINOMA DE CELULAS ESCAMOSAS CERATINIZADO SOE","LIPOSSARCOMA SOE","ADENOCARCINOMA SEBACEO","LINFOMA NASAL E TIPO NASAL DE CELULAS TNK","DOENCA MIELOPROLIFERATIVA CRONICA SOE", "HIDRADENOMA NODULAR MALIGNO","SARCOMA EPITELIOIDE","LINFOMA DE CELULAS T PERIFERICO SOE","TIMOMA MALIGNO","TUMOR MISTO MULLERIANO",
+                                                                    "ADENOMAS ENDOCRINOS MULTIPLOS","DOENCA LINFOPROLIFERATIVA GAMAT","COMEDOCARCINOMA NAO INFILTRANTE","LEUCEMIA DE CELULAS CABELUDAS PILOSAS \\HAIRY CELL\\","RABDOMIOSSARCOMA PLEOMORFICO TIPO ADULTO","PLASMOCITOMA SOE","LIPOSSARCOMA MIXOIDE","ADENOCARCINOMA TRABECULAR","CISTADENOCARCINOMA SOE","LEUCEMIA MIELOIDE AGUDA COM MATURACAO","TUMOR CISTICO MUCINOSO DE MALIGNIDADE LIMITROFE","OSTEOSSARCOMA SOE","LEUCEMIA LINFOBLASTICA DE CELULAS PRECURSORAS TIPO B","DOENCA IMUNOPROLIFERATIVA SOE","ADENOCARCINOMA COM METAPLASIA ESCAMOSA","DOEN\x80A DE SEZARY",
+                                                                    "MIELOESCLEROSE COM METAPLASIA MIELOIDE","TUMOR CARCINOIDE ATIPICO","LINFOMA MALIGNO LINFOPLASMOCITICO","ADENOCARCINOMA EM POLIPO ADENOMATOSO","LEUCEMIA CRONICA NEUTROFILICA","CARCINOMA ADENOESCAMOSO","CISTADENOCARCINOMA PAPILAR SOE","MENINGIOMA MALIGNO","SEMINOMA SOE","DOENCA MIELOPROLIFERATIVA CRONICA","LINFOMA MALIGNO DE CELULAS GRANDES NAOCLIVADAS DIFUSO","TUMOR ADENOCARCINOIDE","LINFOMA CUTANEO","CARCINOMA DE CELULAS PEQUENAS INTERMEDIARIAS","OSTEOSSARCOMA DE CELULAS PEQUENAS","CARCINOMA IN SITU INTRADUCTAL E LOBULAR",
+                                                                    "CARCINOMA DUCTAL DE GLANDULA SUDORIPARA ESCLEROSANTE","LEUCEMIA LINFOBLASTICA DE CELULAS PRECURSORAS SOE","CARCINOMA ESCAMOCELULAR IN SITU COM INVASAO QUESTIONAVEL DO ESTROMA","CARCINOMA DE CELULAS RENAIS TIPO CROMOFOBO","LINFOMA DE HODGKIN TIPO LINFOCITICO","NEOPLASIA DE COMPORTAMENTO INCERTO SE BENIGNO OU MALIGNO","PLASMOCITOMA EXTRAMEDULAR EXCETO OSSO M97313","MESOTELIOMA EPITELIOIDE MALIGNO","LINITE PLASTICA","TUMOR MISTO MALIGNO SOE","TUMOR PAPILAR INTRADUCTAL MUCINOSO COM DISPLASIA MODERADA","TIMOMA TIPO A SOE",
+                                                                    "CARCINOMA DE CELULAS RENAIS ASSOCIADO A CISTO","CARCINOMA SIMPLES","CARCINOMA PAPILAR DE SUPERFICIE SEROSA","SARCOMA INDIFERENCIADO","SARCOMA HISTIOCITICO","CARCINOMA ESCAMOSO DE CELULAS GRANDES NAO CERATINIZADO SOE","CARCINOMA HEPATOCELULAR E COLANGIOCARCINOMA COMBINADOS","CARCINOMA DE CELULAS ESCAMOSAS MICROINVASOR","CARCINOMA DE CELULAS ESCAMOSAS GRANDES NAO CERATINIZADO","TUMOR DE CELULAS GIGANTES DO OSSO","LEUCEMIA MIELOIDE AGUDA SEM MATURACAO","HEMANGIOENDOTELIOMA SOE","SARCOMA DO ESTROMA ENDOMETRIAL BAIXO GRAU",                                      
+                                                                    "MIOEPITELIOMA MALIGNO,POLICITEMIA VERA","CISTADENOMA MUCINOSO DE MALIGNIDADE LIMITROFE","DOEN\x80A DE HODGKIN ESCLEROSE NODULAR DEPLECAO LINFOCITICA","SARCOMA DO ESTROMA ENDOMETRIAL","MELANOMA DESMOPLASICO MALIGNO","LEUCEMIA MIELOIDE AGUDA COM ANORMALIDADE EM 11q23","MELANOMA FUSOCELULAR SOE","CISTADENOMA SEROSO DE MALIGNIDADE LIMITROFE \\BORDERLINE\\","ARCINOMA DE CELULAS GIGANTES","CARCINOMA ESCAMOSO PAPILAR NAO INVASIVO","TIMOMA TIPO B1 SOE","CISTADENOCARCINOMA MUCINOSO SOE","ADENOCARCINOMA COM DIFERENCIACAO NEUROENDOCRINA",                                
+                                                                    "LINFOMA DE CELULAS T PERIFERICO LAID","CARCINOMA EM ADENOMA PLEOMORFICO","FIBROMIXOSSARCOMA","HEMANGIOENDOTELIOMA EPITELIOIDE MALIGNO","GAMOPATIA MONOCLONAL","CARCINOMA ESCAMOSO DE CELULAS PEQUENAS NAO CERATINIZADO","LIPOSSARCOMA DEDIFERENCIADO","CARCINOMA DE CELULAS RENAIS SARCOMATOIDE","LINFOMA DE CELULAS DA ZONA MARGINAL ESPLENICA","CARCINOMA DE CELULAS ESCAMOSAS ADENOIDE,CARCINOMA DE APENDICE CUTANEO","ADENOMA VILOSO SOE","SARCOMA ALVEOLAR DE PARTES MOLES","LINFOMA MALIGNO DE CELULAS GRANDES CLIVADAS DIFUSO",                             
+                                                                    "ADENOCARCINOMA EXOCRINO MISTO DE CELULAS DAS ILHOTAS","ADENOCARCINOMA MUCINOSO TIPO ENDOCERVICAL","HEMANGIOENDOTELIOMA MALIGNO","CORDOMA CONDROIDE","PANMIELOSE AGUDA","TUMOR DE CELULAS DA GRANULOSA SOE","DERMATOFIBROSSARCOMA PROTUBERANTE PIGMENTADO","LEUCEMIA PROMIELOCITICA AGUDA","LEIOMIOSSARCOMA EPITELIOIDE","FIBROMA CELULAR","CARCINOMA NEUROENDOCRINO DE GRANDES CELULAS","LINFOMA LINFOBLASTICO DE CELULAS PRECURSORAS B","TUMOR BASOCELULAR","CARCINOMA LINFOEPITELIAL","NEURINOMATOSE","CARCINOMA PLEOMORFICO","ADENOCARCINOMA ESQUIRROSO",
+                                                                    "LEUCEMIA DE PLASMOCITOSP","APILOMA UROTELIAL","LEUCEMIA MONOCITICA AGUDA","TIMOMA TIPO A MALIGNO","ADENOCARCINOMA OXIFILICO","CARCINOMA FOLICULAR POUCO INVASIVO","CARCINOMA PSEUDOSSARCOMATOSO","CARCINOMA INTRACISTICO SOE","MIELOFIBROSE AGUDA","SARCOMA MIELOIDE","TUMOR FILODES SOE","LEUCEMIA CRONICA SOE","ADENOCARCINOMA IN SITU EM ADENOMA VILOSO","MELANOMA MALIGNO EM MELANOSE PRECANCEROSA","LEUCEMIA MIELOIDE AGUDA RELACIONADA AO TRATAMENTO SOE","ASTROCITOMA GEMISTOCITICO","LIPOMA ATIPICO","CARCINOMA INTRACISTICO NAO INFILTRANTE",
+                                                                    "TUMOR MALIGNO TIPO DE CELULAS PEQUENAS","CARCINOMA HEPATOCELULAR PLEOMORFICO","SARCOMA DE CELULAS CLARAS EXCETO DO RIM M89643","ADENOCARCINOMA EM ADENOMA VILOSO","OSTEOSSARCOMA TELANGIECTASICO","NEURILEMOMA MALIGNO","CARCINOMA PAPILAR VARIANTE FOLICULAR","INSULINOMA MALIGNO","TIMOMA TIPO B2 MALIGNO","OLIGODENDROGLIOMA ANAPLASICO","NEOPLASIA INTRAEPITELIAL ESCAMOSA GRAU III","TUMOR DE KLATSKIN","ADENOCARCINOMA DE CELULAS MISTAS","PERINEUROMA MALIGNO","ADENOCARCINOMA FOLICULAR BEM DIFERENCIADO","MENINGIOMA PAPILAR","LEUCEMIA MIELOIDE AGUDA T 821 q22q22",                                           
+                                                                    "ADENOCARCINOMA EM POLIPOSE ADENOMATOSA DO COLON","ADENOCARCINOMA POLIMORFO DE BAIXO GRAU","SARCOMA SINOVIAL FUSOCELULAR","ADENOCARCINOMA IN SITU EM ADENOMA TUBULOVILOSO","ADENOFIBROMA SEROSO MALIGNIDADE LIMITROFE","LEUCEMIA MIELOIDE CRONICA ATIPICA BCRABL NEGATIVA","CARCINOMA DE CELULAS TRANSICIONAIS FUSIFORMES","GLIOBLASTOMA DE CELULAS GIGANTES","CARCINOMA LOBULAR IN SITU SOE","LINFOMA LINFOEPITELOIDE","CONDROSSARCOMA MIXOIDE","CARCINOIDE DE CELULAS CALICIFORMES","TIMOMA SOE","SINDROME MIELODISPLASICA RELACIONADA A TERAPIA SOE",
+                                                                    "CARCINOMA DE DUCTOS COLETORES","CARCINOFIBROMA","LINFOMA LINFOBLASTICO DE CELULAS PRECURSORAS SOE","LINFANGIOSSARCOMA","ADENOCARCINOMA DE GLANDULA SUDORIPARA","CARCINOMA DE CELULAS GRANULARES","LIPOSSARCOMA MISTO","ADENOCARCINOMA FOLICULAR TRABECULAR","ESTESIONEUROBLASTOMA","ADENOCARCINOMA HEPATOIDE","CARCINOMA HEPATOCELULAR ESQUIRROSO","TUMOR TROFOBLASTICO EPITELIOIDE","TUMOR DE GLANDULA SUDORIPARA SOE","DOEN\x80A DE HODGKIN CELULARIDADE MISTA SOE","LINFOMA MALIGNO LINFOBLASTICO","LINFOMA MALIGNO DE CELULAS PEQUENAS NAO CLIVADAS DIFUSO",
+                                                                    "TUMOR CISTICO PAPILAR SEROSO DE MALIGNIDADE LIMITROFE","LEUCEMIA PROLINFOCITICA SOE", "LESAO LINFOPROLIFERATIVA CUTANEA PRIMARIA DE CELULAS T CD30","ADENOCARCINOFIBROMA DE CELULAS CLARAS","LEUCEMIA MIELOIDE AGUDA COM EOSINOFILOS ANORMAIS NA MEDULA","RABDOMIOSSARCOMA PLEOMORFICO","LEUCEMIALINFOMA DE CELULAS T DO ADULTO","ADENOFIBROMA MUCINOSO MALIGNIDADE LIMITROFE","CARCINOMA TIMICO SOE","LINFOMA SUBCUTANEO TIPO PANICULITE DE CELULAS T","CARCINOMA CROMOFOBO","CARCINOMA EPITELIALMIOEPITELIAL,MENINGIOMA ATIPICO","ADENOCARCINOMA ECRINO",                                                          
+                                                                    "CARCINOMA BRONQUIOLOALVEOLAR MUCINOSO","EPENDIMOMA SOE","MESONEFROMA MALIGNO","MASTOCITOSE MALIGNA","CISTADENOCARCINOMA DE CELULAS ACINOSAS","OSTEOSSARCOMA FIBROBLASTICO","MELANOMA MISTO EPITELIOIDE E FUSOCELULAR","LIPOSSARCOMA DESDIFERENCIADO","LINFOMA HISTIOCITICO VERDADEIRO","HEPATOBLASTOMA","LINFOMA MALIGNO LINFOCITICO BEM DIFERENCIADO NODULAR","ERITROLEUCEMIA","TUMOR DE CELULAS ACINOSAS","GERMINOMA","LEUCEMIA CRONICA MIELOGENICA BCRABL POSITIVA","ADENOCARCINOFIBROMA MUCINOSO","TUMOR DE CELULAS DE LEYDIG SOE",
+                                                                    "CARCINOMA DE CELULAS ESCAMOSAS PEQUENAS NAO CERATINIZADO","CARCINOMA PAPILAR INTRADUCTAL MUCINOSO NAO INVASIVO","DOEN\x80A DE HODGKIN ESCLEROSE NODULAR FASE CELULAR","OLIGODENDROGLIOMA SOE","CONDROSSARCOMA SOE","HEMANGIOPERICITOMA SOE","CARCINOMA BRONQUIOLOALVEOLAR MISTO MUCINOSO E NAO MUCINOSO","GLIOMA MISTO,MIOFIBROMATOSE","CARCINOMA DO CORTEX SUPRARENAL","GLIOSSARCOMA","CARCINOMA BRONQUIOLOALVEOLAR NAO MUCINOSO","CONDROSSARCOMA DEDIFERENCIADO","CARCINOMA DE CELULAS DE SERTOLI","LEUCEMIA PROLINFOCITICA TIPO CELULAS T", 
+                                                                    "CARCINOMA DE CELULAS ESCAMOSAS FUSIFORMES","FIBROMATOSE AGRESSIVA","LINFOMA MALIGNO DE CELULAS PEQUENAS CLIVADAS DIFUSO","LINFOMA DE CELULAS T PERIFERICO DE CELULAS PEQUENAS PLEOMORFICAS","SINDROME MIELODISPLASICA COM DELECAO 5q 5q","SARCOMA ESTROMAL SOE","LINFOMA INTESTINAL DE CELULAS T","TUMOR MALIGNO DE CELULAS CLARAS","CARCINOMA HEPATOCELULAR TIPO FUSOCELULAR","CARCINOMA PAPILAR CELULAS OXIFILICAS","HEMANGIOPERICITOMA MALIGNO","TUMOR MALIGNO DA BAINHA DE NERVO PERIFERICO","TUMOR MALIGNO FIBROSO SOLITARIO","CARCINOMA SECRETOR DA MAMA",
+                                                                    "FIBROMATOSE ABDOMINAL","MELANOMA LENTIGINOSO MALIGNO DAS EXTREMIDADES PERIFERICAS","CARCINOMA PAPILAR DE CELULAS ESCAMOSAS","ADENOCARCINOMA EM POLIPOS ADENOMATOSOS MULTIPLOS","LEUCEMIA LINFOBLASTICA DE CELULAS T PRECURSORAS","LINFOMA MALIGNO CENTROBLASTICOCENTROCITICO FOLICULAR","TERATOMA MALIGNO SOE","OSTEOBLASTOMA AGRESSIVO","LEUCEMIA MIELOMONOCITICA CRONICA","PARAGANGLIOMA SOE","LINFOMA DE CELULAS B MONOCITOIDES","CARCINOMA DUCTAL INFILTRANTE","ADENOCARCINOMA COM METAPLASIA CARTILAGINOSA E OSSEA","DOEN\x80A DE HODGKIN PREDOMINANCIA LINFOCITICA NODULAR",
+                                                                    "CONDROSSARCOMA DE CELULAS CLARAS","LINFOMA LINFOBLASTICO DE CELULAS PRECURSORAS T","ANEMIA REFRATARIA COM EXCESSO DE BLASTOS EM TRANSFORMACAO","CARCINOMA PAPILAR CELULAS COLUNARES","ADENOCARCINOMA TIPO ENDOCERVICAL","ADENOCARCINOFIBROMA SEROSO","TUMOR DE SACO VITELINO","LEUCEMIA LINFOCITICA DE CELULAS GRANDES TIPO T GRANULARES","SARCOMA DE CELULAS DENDRITICAS FOLICULAR","MELANOMA DE CELULAS BALONIFORMES","DOENCA DE DEPOSITO DE IMUNOGLOBULINA","ADENOCARCINOMA DE PROPAGACAO SUPERFICIAL","SARCOMA SINOVIAL BIFASICO","ADENOMA FOLICULAR ATIPICO",                                                      
+                                                                    "TUMOR GLOMICO MALIGNO","OSTEOSSARCOMA CENTRAL","RABDOMIOSSARCOMA ALVEOLAR","ADENOCARCINOMA COM METAPLASIA FUSOCELULAR","CARCINOMA DE CELULAS POLIGONAIS","HEMANGIOENDOTELIOMA EPITELIOIDE SOE","CARCINOMA FUSOCELULAR","PARAGANGLIOMA MALIGNO","DOEN\x80A DE HODGKIN DEPLECAO LINFOCITICA SOE","TUMOR NEUROECTODERMICO PRIMITIVO","CARCINOMA MEDULAR ATIPICO","FEOCROMOCITOMA MALIGNO","TUMOR DE CELULAS DAS ILHOTAS SOE","CARCINOMA INTRADUCTAL MICROPAPILAR","CISTADENOCARCINOMA DE DUCTOS BILIARES","MASTOCITOMA SOE","TUMOR DE CELULAS GRANULARES MALIGNO","TUMOR ESTROMAL SOE",
+                                                                    "CARCINOMA DE CELULAS DAS ILHOTAS","ANEMIA REFRATARIA COM SIDEROBLASTOS","TUMOR MUCOEPIDERMOIDE","TIMOMA TIPO AB SOE","MEDULOBLASTOMA SOE","ADENOFIBROMA ENDOMETRIOIDE DE MALIGNIDADE LIMITROFE","CARCINOIDE COMPOSTO","CARCINOMA DE CELULAS PEQUENAS FUSIFORMES","ADENOMA ENDOMETRIOIDE DE MALIGNIDADE LIMITROFE","CARCINOMA ESCAMOSO COM FORMACAO CORNEA","ASTRINOMA MALIGNO","COMEDOCARCINOMA SOE","MELANOMA MALIGNO EM LENTIGO MELANOTICO DE HUTCHINSON","CARCINOMA DE GRANDES CELULAS RABDOIDE","CARCINOMA PAPILAR INTRADUCTAL MUCINOSO INVASIVO","CISTADENOCARCINOMA MUCINOSO NAO INVASIVO",
+                                                                    "CARCINOMA INSULAR","TIMOMA TIPO B1 MALIGNO","LIPOSSARCOMA FIBROBLASTICO,ADENOCARCINOMA PAPILAR ECRINO","LEUCEMIA AGUDA BIFENOTIPICA","MESOTELIOMA FIBROSO MALIGNO","TUMOR CARCINOIDE DE MALIGNIDADE INCERTA","CARCINOMA HEPATOCELULAR DE CELULAS CLARAS","HISTIOCITOSE DE CELULAS DE LANGERHANS SOE","LINFOMA MALIGNO CENTROBLASTICO FOLICULAR","LEUCEMIA LINFOIDE SUBAGUDA","TUMOR MALIGNO DE CELULAS GIGANTES DE PARTES MOLES","RABDOMIOSSARCOMA EMBRIONARIO","SEMINOMA ESPERMATOCITICO LEUCEMIA MONOCITICA CRONICA","LINFOMA DA ZONA T","MESOTELIOMA BIFASICO MALIGNO",
+                                                                    "LINFOMA MALIGNO LINFOCITICO POUCO DIFERENCIADO NODULAR","TERATOMA SOE","SARCOMA DE CELULAS DENDRITICAS DIGITIFORME","LEUCEMIA PROLINFOCITICA TIPO CELULAS B","ADENOCARCINOMA COM METAPLASIA APOCRINA","LESAO IMUNOPROLIFERATIVA ANGIOCENTRICA","ADAMANTINOMA DE OSSOS LONGOS","CONDROSSARCOMA MESENQUIMAL","LEUCEMIA DE CELULAS DE BURKITT","GLIOMATOSE CEREBRAL","MELANOMA FUSOCELULAR TIPO B","ASTROCITOMA FIBRILAR","LINFOMA MALIGNO CENTROCITICO","ADENOCARCINOMA ENDOMETRIOIDE DE CELULAS CILIARES","TUMOR DE CELULAS DE SERTOLILEYDIG POUCO DIFERENCIADA",
+                                                                    "CARCINOMA DE CELULAS GIGANTES E DE CELULAS FUSIFORMES","CARCINOMA HEPATOCELULAR FIBROLAMELAR","CARCINOMA DE CELULAS GIGANTES SEMELHANTES A OSTEOCLASTO","LINFANGIOMIOMATOSE","TUMOR MALIGNO DE CELULAS GIGANTES TENOSSINOVIAL","TIMOMA TIPO B3 SOE","CORIOCARCINOMA SOE","LEIOMIOSSARCOMA MIXOIDE","MELANOMA MALIGNO EM NEVO PIGMENTADO GIGANTE","MESENQUINOMA SOE","LEIOMIOMATOSE SOE","CARCINOMA ESCLEROSANTE NAOENCAPSULADO","OLIGODENDROBLASTOMA","LINFOMA MALIGNO CENTROBLASTICOCENTROCITICO DIFUSO","DOEN\x80A DE HODGKIN PREDOMINANCIA LINFOCITICA SOE","ESPIRADENOMA ECRINO MALIGNO",
+                                                                    "TUMOR MALIGNO DE CELULAS GIGANTES DO OSSO","CARCINOMA DE CELULAS PARIETAIS","SARCOMA DE CELULAS DE LANGERHANS","NEOPLASIA INTRATUBULAR DE CELULAS GERMINATIVAS","MESENQUIMOMA SOE","GANGLIOGLIOMA","TUMOR MIOFIBROBLASTICO SOE","CARCINOMA ENDOMETRIOIDE","RABDOMIOSSARCOMA EMBRIONARIO SOE","CRANIOFARINGIOMA ADAMANTINOMATOSO","TIMOMA TIPO AB MALIGNO","CARCINOMA IN SITU DE CELULAS ESCAMOSAS COM INVASAO QUESTION\xb5VEL DO ESTROMA","SARCOMA RABDOIDE", "SARCOMA SINOVIAL DE CELULAS EPITELIOIDES","MESENQUIMOMA MALIGNO","TUMOR HIPERNEFROIDE","LINFOMA MALIGNO CENTROBLASTICO DIFUSO",
+                                                                    "LEUCEMIA DE CELULAS TIPO NK AGRESSIVA","FIBROBLASTOMA DE CELULAS GIGANTES", "CARCINOMA PSEUDOPAPILAR SOLIDO","TUMOR DO GLOMO JUGULAR","CARCINOMA EMBRIONARIO SOE","SARCOMA DE C\x90LULAS CLARAS DO RIM","TUMOR DO CORPO CAROTIDEO","GASTRINOMA SOE","NEVO AZUL MALIGNO","FIBROMA DESMOPLASICO","DISGERMINOMA","TUMOR PAPILAR CISTICO","HEMANGIOBLASTOMA","MIOSSARCOMA","CARCINOMA PAPILAR ENCAPSULADO","ESTROMA OVARIANO MALIGNO","TUMOR DE MUSCULO LISO SOE","CARCINOMA CISTICO HIPERSSECRETOR","LINFOMA MALIGNO DO MEDIASTINO DE CELULAS GRANDES B","AMELOBLASTOMA MALIGNO",
+                                                                    "TUMOR ODONTOGENICO MALIGNO","MENINGIOMATOSE SOE","TUMOR DE BRENNER DE MALIGNIDADE LIMITROFE","TUMOR MISTO MESODERMICO","CARCINOSSARCOMA EMBRIONARIO","ADENOCARCINOMA FETAL","TUMOR DE CELULAS GIGANTES DE PARTES MOLES SOE","TUMOR DO CORPO AORTICO","CARCINOMA DUCTAL DESMOPLASICO","NEUROBLASTOMA SOE","POLIEMBRIOMA","RABDOMIOSSARCOMA FUSOCELULAR","TIMOMA TIPO B3 MALIGNO","CARCINOMA DE CELULAS VITREAS","CARCINOMA RICO EM LIPIDES","SARCOMA DE CELULAS PEQUENAS","MESOTELIOMA CISTICO","CARCINOMA ACIDOFILO","CRANIOFARINGIOMA","ASTROCITOMA PROTOPLASMATICO",
+                                                                    "CARCINOMA MISTO MEDULAR PAPILAR","HISTIOCITOMA FIBROSO ANGIOMATOIDE","ASTROCITOMA PILOCITICO","EPENDIMOMA PAPILAR","TUMOR MALIGNO DE CELULAS DE LEYDIG","CARCINOMA SCHNEIDERIANO","TUMOR MALIGNO TIPO DE CELULAS GIGANTES","TUMOR DE MUSCULO LISO DE MALIGNIDADE LIMITROFE","NEVO PIGMENTADO GIGANTE SOE","OSTEOSSARCOMA PERIOSTAL","MELANOMA FUSOCELULAR TIPO A","TUMOR MALIGNO DA BAINHA DE NERVO PERIFERICO COM DIFERENCIACAO RABDOMIOBLASTICA","TUMOR MISTO DE CELULAS GERMINATIVAS","ANGIOMIXOMA","LINFOMA DE CELULAS T PERIFERICO PLEOMORFICO DE CELULAS MEDIAS E GRANDES",
+                                                                    "HISTIOCITOSE MALIGNA","ABDOMIOSSARCOMA TIPO MISTO","CISTADENOMA MUCINOSO PAPILAR DE MALIGNIDADE LIMITROFE","CARCINOMA MEDULAR COM ESTROMA LINFOIDE","OSTEOSSARCOMA EM DOENCA DE PAGET DO OSSO","PAPILOMA DE CELULAS TRANSICIONAIS TIPO INVERTIDO", "CORDOMA DEDIFERENCIADO","TUMOR PAPILAR DE SUPERFICIE SEROSA MALIGNIDADE LIMITROFE","NEUROFIBROMATOSE SOE","NEUROCITOMA CENTRAL","CARCINOMA MEDULAR COM ESTROMA AMILOIDE","MEDULOBLASTOMA DESMOPLASICO","ANDROBLASTOMA SOE","CORIOCARCINOMA COMBINADO COM OUTROS ELEMENTOS DE CELULAS GERMINATIVAS","TUMOR ODONTOGENICO SOE",
+                                                                    "TUMOR DE CELULAS ESTEROIDE MALIGNO","ADENOFIBROMA DE CELULAS CLARAS MALIGNIDADE LIMITROFE","CARCINOMA DA GLANDULA PITUITARIASOE","PARAGANGLIOMA EXTRASUPRARENAL SOE","PINEOCITOMA","EPENDIMOMA MIXOPAPILAR","HISTIOCITOSE DE CELULAS DE LANGERHANS MULTIFOCAL","PARAGANGLIOMA EXTRASUPRARENAL MALIGNO","TUMOR CARCINOIDE ARGENTAFINICO MALIGNO","TUMORLET","HISTIOCITOSE DE CELULAS DE LANGERHANS DISSEMINADA","MELANOSE PRECANCEROSA SOE","ANEMIA REFRATARIA COM EXCESSO DE BLASTOS COM TRANSFORMACAO","CARCINOMA RICO EM GLICOGENIO","TUMOR DESMOPLASICO DE CELULAS PEQUENAS E REDONDAS",
+                                                                    "TUMOR DE CELULAS DE SERTOLILEYDIG RETIFORME","TERATOMA COM TRANSFORMACAO MALIGNA","CISTADENOMA SEROSO PAPILAR DE MALIGNIDADE LIMITROFE","DOEN\x80A DE HODGKIN DEPLECAO LINFOCITICA RETICULAR","XANTOASTROCITOMA PLEOMORFICO","LINFOMA HEPATOESPLENICA TIPO GAMADELTA","SINDROME HIPEREOSINOFILICO","TUMOR FIBROHISTIOCITICO PLEXIFORME","PINEOBLASTOMA","TUMOR DE CELULAS DE SERTOLILEYDIG COM DIFERENCIACAO INTERMEDIARIA E ELEMENTOS H","TUMOR CISTICO MUCINOSO COM DISPLASIA MODERADA","LINFADENOPATIA ANGIOIMUNOBLASTICA","SARCOMA CEREBELAR SOE",
+                                                                    "OSTEOSSARCOMA DE SUPERFICIE DE ALTO GRAU","TUMOR DE CELULAS DE SERTOLI SOE","TUMOR DE CELULAS DA TECAGRANULOSA","CISTADENOMA PAPILAR DE MALIGNIDADE LIMITROFE","PILOMATRIXOMA MALIGNO","CARCINOIDE DE CELULAS SEMELHANTES A ENTEROCROMAFINICAS SOE","LEUCEMIA DE MASTOCITOS","OSTEOSSARCOMA PARAOSTAL","EFUSAO POR LINFOMA PRIMARIO","LEIOMIOMA METASTATIZANTE","TUMOR DE TRITAO MALIGNO","OSTEOSSARCOMA INTRAOSSEO BEM DIFERENCIADO","LEUCEMIA EOSINOFILICA","DOENCA DA CADEIA PESADA ALFA","CARCINOMA DE CELULAS RENAIS","SEMINOMA ANAPLASICO","CARCINOMA MISTO MEDULAR FOLICULAR",
+                                                                    "TUMOR DE CELULAS DE SERTOLILEYDIG COM DIFERENCIACAO INTERMEDIARIA","ASTROBLASTOMA","TUMOR DE ASKIN","DOEN\x80A DE HODGKIN PREDOMINANCIA LINFOCITICA DIFUSA","GANGLIOGLIOMA ANAPLASICO","MELANOCITOMA MENINGEANO","TUMOR DE SEIO ENDODERMICO","FIBROSSARCOMA PERIOSTAL","ADENOCARCINOMA CERUMINOS O","CARCINOMA DE PLEXO COROIDE","CONDROMATOSE SOE","TUMOR MALIGNO DE CELULAS SEMELHANTES A ENTEROCROMAFINICAS","CRANIOFARINGIOMA PAPILAR","CARCINOMA SEROSO PAPILAR SUPERFICIAL","GLIOMA SUBEPENDIMAL","LINFOMA MALIGNO LINFOCITICO NODULAR MODERADAMENTE DIFERENCIADO","TERATOCARCINOMA",
+                                                                    "TUMOR DOS CORDOES SEXUAIS COM TUBULOS ANULARES","SARCOMA DE HODGKIN","RETINOBLASTOMA DIFERENCIADO","GLUCAGONOMA MALIGNO","BLASTOMA PULMONAR","SOMATOSTATINOMA SOE","TUMOR DE CELULAS GERMINATIVAS NAO SEMINOMATOSO","GLIOMA CORDOIDE","OSTEOSSARCOMA JUSTACORTICAL","ASTROCITOMA SUBEPENDIMAL DE CELULAS GIGANTES","TUMOR BRONCOALVEOLAR INTRAVASCULAR","APUDOMA","TUMOR CISTICO DE CELULAS CLARAS MALIGNIDADE LIMITROFE","SARCOMA MONSTROCELULAR","TUMOR DE CELULAS DE SERTOLILEYDIG POUCO DIFERENCIADO COM ELEMENTOS HETEROLOGOS","ADENOMATOSE PULMONAR","TUMOR DO ESTROMA DOS CORDOES SEXUAIS FORMAS MISTAS",
+                                                                    "GANGLIONEUROBLASTOMA","CONDROBLASTOMA MALIGNO","TECOMA MALIGNO","HEMANGIOENDOTELIOMA FUSOCELULAR","MOLA HIDATIFORME INVASIVA","PARAGANGLIOMA SIMPATICO","TUMOR DO ESTROMA DOS CORDOES SEXUAIS COM DIFERENCIACAO INCOMPLETA","SARCOMATOSE MENINGEA","NEFROBLASTOMA SOE","CARCINOMA BASOFILO","MEDULOMIOBLASTOMA","LEUCEMIA MONOCITICA ALEUCEMICA","SARCOMA DE MASTOCITOS","SARCOMA EMBRIONARIO","BLASTOMA PLEURO PULMONAR","NEFROMA MESOBLASTICO","GLUCAGONOMA SOE","NEFROMA MALIGNO CISTICO","GONADOBLASTOM","DOEN\x80A DE HODGKIN DEPLECAO LINFOCITICA COM FIBROSE DIFUSA","TUMOR TROFOBLASTICO DE LOCALIZACAO PLACENTARIA",
+                                                                    "LEUCEMIA LINFOIDE ALEUCEMICA","FIBROSSARCOMA AMELOBLASTICO","ANDROBLASTOMA MALIGNO","TUMOR EPITELIAL FUSOCELULAR SEMELHANTE A CELULAS TIMICAS","TUMOR JUVENIL DE CELULAS DA GRANULOSA","MEDULOEPITELIOMA SOE","OSTEOCONDROMATOSE SOE","HISTIOCITOSE DE CELULAS DE LANGERHANS UNIFOCAL","DOENCA DE LETTERERSIWE","PAPILOMA ATIPICO DE PLEXO COROIDE","LEUCEMIA SUBAGUDA SOE","LEUCEMIA MIELOIDE SUBAGUDA","FIBROSSARCOMA DE FASCIA","TERATOMA MALIGNO NAO DIFERENCIADO","ESTESIONEUROCITOMA","TERATOMA MALIGNO INTERMEDIARIO","TERATOMA MALIGNO INDIFERENCIADO","OSTEOSSARCOMA INTRACORTICAL",
+                                                                    "CONDROSSARCOMA JUSTACORTICAL","TUMOR DE CELULAS DE SERTOLI GRANDES CELULAS E CALCIFICADAS","TUMOR NEUROGENICO OLFATIVO","MEDULOBLASTOMA DE CELULAS GRANDES","RETINOBLASTOMA SOE","TUMOR TERATOIDERABDOIDE ATIPICO","NEUROEPITELIOMA SOE","PINEALOMA","PANCREATOBLASTOMA","GLIOFIBROMA","NEFROBLASTOMA CISTICO PARCIALMENTE DIFERENCIADO","LEUCEMIA MIELOMONOCITICA JUVENIL","MEDULOEPITELIOMA TERATOIDE","ASTROCITOMA DESMOPLASTICO INFANTIL","FIBROSSARCOMA INFANTIL","PAPILOMA MALIGNO DE PLEXO COROIDE","LEUCEMIA BASOFILICA","RETINOBLASTOMA INDIFERENCIADO","LEUCEMIA MONOCITICA SOE",
+                                                                    "RABDOMIOSSARCOMA COM DIFERENCIACAO GANGLIONICA","MELANOMATOSE MENINGEANA","SIALOBLASTOMA"), labels(c(seq.int(1:770)))))
+dfmodel$EC = as.numeric(factor(dfmodel$EC, levels = c("X","Y","I","II","0","IIIB","III","IIB","IV","IA","IIA","IIIA","0A","IVA","IIIC","IB","IVB","IVC","IB1","IIC","IC","IB2","IIA1","0IS","IA1","IIIC2","IIIC1","IA2","IIA2","IS"), labels(c(seq.int(1:30))))) 
+dfmodel$ECGRUP = as.numeric(factor(dfmodel$ECGRUP, levels = c("X","Y","I","II","0","III","IV"), labels(c(seq.int(1:7)))))                           
+dfmodel$T = as.numeric(factor(dfmodel$T, levels = c("X","Y","1","2","3","IS","4", "1A","4C","A","4B","2A","4A","2B","3B","1B","1C","3A","2C","4D","0","CDIS","PAGET","3C","1MIC","4E","CLIS","2D","3D"), labels(c(seq.int(1:29)))))
+dfmodel$N = as.numeric(factor(dfmodel$N, levels = c("X","Y","0","2","1","2B","1B","2A","1A","3","1C","PN0","3A","CN0","3C","2C","3B"), labels(c(seq.int(1:17)))))
+dfmodel$M = as.numeric(factor(dfmodel$M, levels = c("X","Y","0","1","1B","1A","1C"), labels(c(seq.int(1:7)))))
+dfmodel$TRATAMENTO = as.numeric(factor(dfmodel$TRATAMENTO, levels = c("A","J","D","B","I","C","F","H","E","G"), labels(c(seq.int(1:10)))))  
+dfmodel$FAIXAETAR = as.numeric(factor(dfmodel$FAIXAETAR, levels = c("70+","60-69","50-59","40-49","30-39","20-29","10-19","00-09"), labels(c(seq.int(1:8)))))  
+dfmodel$DSCCIDO = as.numeric(factor(dfmodel$DSCCIDO, levels = c("CARCINOMA BASOCELULAR SOE","LINFOMA MALIGNO DE LINFOCITOS CELULAS B PEQUENAS SOE","CARCINOMA ESCAMOCELULAR SOE","CARCINOMA DE CELULAS TRANSICIONAIS SOE","ADENOCARCINOMA SOE","EPITELIOMA MALIGNO","SARCOMA DE KAPOSI","CARCINOMA BASOCELULAR SUPERFICIAL MULTIFOCAL","CARCINOMA ESCAMOCELULAR IN SITU SOE","ADENOCARCINOMA TUBULAR","CARCINOMA SOE","CARCINOMA DE CELULAS ACINOSAS", "CARCINOMA BASOCELULAR NODULAR",                                                           
+                                                                "CARCINOMA DUCTAL INFILTRANTE SOE","CARCINOMA BASOCELULAR INFILTRATIVO SOE","CARCINOMA DE CELULAS EM ANEL DE SINETE","CARCINOMA PAPILAR SOE","NEOPLASIA MALIGNA","DOENCA DE BOWEN","CARCINOMA BASOESCAMOSO","LEUCEMIA MIELOMONOCITICA CRONICA SOE","CARCINOMA PSEUDOSSARCOMATOSO","LEUCEMIA MIELOIDE AGUDA COM DISPLASIA DE MULTILINHAGEM","CARCINOMA DUCTAL INFILTRANTE E LOBULAR","GRANULOMA DE HODGKIN",
+                                                                "LEUCEMIA LINFOBLASTICA DE CELULAS PRECURSORAS SOE","CARCINOMA DE CELULAS DE TRANSICAO PAPILAR NAO INVASIVO","MIELOMA MULTIPLO","TUMOR ESTROMAL GASTROINTESTINAL SOE","CARCINOSSARCOMA SOE","CISTADENOCARCINOMA SEROSO SOE","LINFOMA MALIGNO NAOHODGKIN SOE","CARCINOMA METATIPICO","CARCINOMA ESCAMOSO CERATINIZADO SOE","EPENDIMOMA ANAPLASICO","CARCINOMA LOBULAR SOE","ANGIOMIOSSARCOMA",                                                                         
+                                                                "CARCINOMA ANAPLASICO SOE","CARCINOMA DE CELULAS DE MERKEL","SINDROME MIELODISPLASICA SOE","MELANOMA MALIGNO SOE","ADENOCARCINOMA TIPO INTESTINAL","CARCINOMA DE CELULAS PEQUENAS E DE CELULAS GRANDES","LINFOMA MALIGNO DE CELULAS GRANDES B DIFUSO SOE","LIPOSSARCOMA BEM DIFERENCIADO","CARCINOMA VERRUCOSO SOE","CARCINOMA PAPILAR DE CELULAS TRANSICIONAIS","TUMOR MALIGNO TIPO DE CELULAS FUSIFORMES",                                                 
+                                                                "CARCINOMA ESCAMOSO DE CELULAS FUSIFORMES","NEOPLASIA INTRAEPITELIAL GLANDULAR GRAU III","CARCINOMA ESCAMOSO BASALOIDE","CARCINOMA BASAL ADENOIDE","CARCINOMA CLOACOGENICO","ADENOCARCINOMA MUCINOSO","LINFOMA FOLICULAR GRAU 2","TRICOLEMOCARCINOMA","LEUCEMIA MEGACARIOBLASTICA AGUDA","CARCINOMA MUCOEPIDERMOIDE","ADENOCARCINOMA FOLICULAR SOE","CARCINOMA TIPO DIFUSO","CARCINOMA BASOCELULAR FIBROEPITELIAL",                                                     
+                                                                "CARCINOMA INDIFERENCIADO SOE","CARCINOMA ESCAMOSO MICROINVASOR","LINFOMA MALIGNO SOE","SARCOMA FUSOCELULAR","CARCINOMA ADENOIDE CISTICO","LEUCEMIA LINFOCITICA CRONICA DE CELULAS BLINFOMA LINFOCITICO DE PEQUENAS CELULAS","MELANOMA NODULAR","CARCINOMA DE CELULAS NAO PEQUENAS","CARCINOMA IN SITU CRIBRIFORME","HEMANGIOSSARCOMA","ALTERACOES LINFOPROLIFERATIVAS SOE","LINFOMA DE CELULAS DA ZONA DO MANTO",                                                      
+                                                                "ADENOCARCINOMA DE CELULAS CLARAS SOE","TROMBOCITEMIA ESSENCIAL","MESOTELIOMA MALIGNO","CARCINOMA OAT CEL","CARCINOMA DUCTAL INFILTRATIVO MISTO COM OUTROS TIPOS DE CARCINOMA","HISTIOCITOMA FIBROSO ATIPICO","CARCINOMA DUCTULAR INFILTRANTE","CARCINOMA FUSOCELULAR SOE","ADENOCARCINOMA VILOSO","LEIOMIOSSARCOMA SOE","NEOPLASIA INTRAEPITELIAL ESCAMOSA GRAU III","CARCINOMA DE CELULAS PEQUENAS SOE",                                                        
+                                                                "ADENOCARCINOMA APOCRINO","MELANOMA EM LENTIGO MALIGNO","ADENOFIBROMA ENDOMETRIOIDE MALIGNO","CISTADENOCARCINOMA MUCINOSO PAPILAR","ADENOCARCINOMA PRODUTOR DE MUCINA","ADENOCARCINOMA ENDOMETRIOIDE SOE","ADENOCARCINOMA IN SITU SOE","LINFOMA DE ZONA MARGINAL TIPO CELULAS B SOE","MELANOMA LENTIGINOSO MALIGNO DAS EXTREMIDADES","HISTIOCITOMA FIBROSO MALIGNO","SARCOMA DE EWING",                                                                        
+                                                                "ADENOCARCINOMA EM ADENOMA TUBULOVILOSO","CARCINOMA NEUROENDOCRINO SOE","SARCOMA SOE","CISTADENOCARCINOMA PAPILAR SEROSO","LEUCEMIA MIELOIDE AGUDA SOE","GLIOBLASTOMA SOE","DOENCA MIELOPROLIFERATIVA SOE","LEUCEMIA MIELOIDE CRONICA SOE","CARCINOMA IN SITU SOE","LINFOMA FOLICULAR SOE","MELANOMA LENTIGINOSO DE MUCOSA","MELANOMA IN SITU","DOENCA DE PAGET EXTRAMAMARIA EXCETO DOENCA DE PAGET DO OSSO",                              
+                                                                "LIPOSSARCOMA PLEOMORFICO","CARCINOMA CRIBRIFORME SOE","CARCINOMA METAPLASICO SOE","CARCINOMA HEPATOCELULAR SOE","LINFOMA ANAPLASICO DE GRANDES CELULAS T E NULL","LEUCEMIA MIELOIDE AGUDA COM DIFERENCIACAO MINIMA","CARCINOMA ESCAMOCELULAR PAPILAR","ADENOCARCINOMA BASOCELULAR","MICOSE FUNGOIDE","CELULAS TUMORAIS INCERTO SE BENIGNAS OU MALIGNAS","CARCINOMA PILOMATRICIAL MALIGNO",                                                          
+                                                                "LEUCEMIA SOE","OSTEOSSARCOMA CONDROBLASTICO","LINFOMA MALIGNO DE CELULAS GRANDES B DIFUSO IMUNOBLASTICO SOE","TUMOR CARCINOIDE SOE EXCETO DO APENDICE M82401","ADENOCARCINOMA ALVEOLAR","CARCINOMA INFLAMATORIO","CARCINOMA DE CELULAS RENAIS SOE","CARCINOMA MEDULAR SOE","LEUCEMIA AGUDA SOE","LINFOMA FOLICULAR GRAU 1","ADENOCARCINOMA DE GLANDULAS DA REGIAO ANAL","CARCINOMA INTRADUCTAL NAO INFILTRANTE SOE",                                                
+                                                                "DOEN\x80A DE HODGKIN ESCLEROSE NODULAR SOE","COLANGIOCARCINOMA","SARCOMA SINOVIAL SOE","ADENOCARCINOMA BRONQUIOLOALVEOLAR SOE","ADENOCARCINOMA PAPILAR INTRADUCTAL COM INVASAO","DOEN\x80A DE HODGKIN SOE","LINFOMA DE BURKITT SOE","DOENCA DE PAGET E CARCINOMA DUCTAL INFILTRANTE DA MAMA","SARCOMA ESTROMAL GASTROINTESTINAL","NEOPLASIA DE CELULAS TRANSICIONAIS PAPILAR DE BAIXO POTENCIAL DE MALIGNIDADE",             
+                                                                "TUMOR MALIGNO DE CELULAS DA GRANULOSA","CARCINOMA DUCTAL IN SITU TIPO SOLIDO","CARCINOMA ESCAMOSO ADENOIDE","LINFOMA FOLICULAR GRAU 3","SARCOMA DE CELULAS GIGANTES EXCETO DE OSSO M92503","LINFOMA MALIGNO MISTO DE CELULAS PEQUENAS E GRANDES DIFUSO","MELANOMA DE PROPAGACAO SUPERFICIAL","ADENOCARCINOMA PAPILAR SOE","DOENCA DE PAGET E CARCINOMA INTRADUCTAL DA MAMA","CARCINOMA PAPILAR IN SITU",                                                                
+                                                                "CARCINOMA ESCAMOSO TIPO CELULAS CLARAS","ADENOCARCINOMA COM SUBTIPOS MISTOS","CARCINOMA DE CELULAS TRANSICIONAIS IN SITU","TUMOR FILODES MALIGNO","CARCINOMA SOLIDO SOE","MELANOMA MALIGNO EM REGRESSAO","CARCINOMA DE CELULAS GRANDES SOE","CARCINOMA DE CELULAS DE TRANSICAO MICROPAPILAR","LEUCEMIA LINFOIDE SOE","MIXOSSARCOMA","LEUCEMIA MIELOIDE SOE","ANEMIA REFRATARIA COM EXCESSO DE BLASTOS",                                                 
+                                                                "LENTIGO MALIGNO","CARCINOMA BASALOIDE","ADENOCARCINOMA ENDOMETRIOIDE TIPO SECRETOR","CARCINOMA LOBULAR INFILTRANTE MISTO COM OUTROS TIPOS DE CARCINOMA","ADENOSSARCOMA","MICROCARCINOMA PAPILAR","ADENOCARCINOMA IN SITU EM POLIPO ADENOMATOSO","FIBROSSARCOMA SOE","GLIOMA MALIGNO","CORDOMA SOE","DERMATOFIBROSSARCOMA SOE","LEUCEMIA MIELOMONOCITICA AGUDA","MELANOMA AMELANOTICO","ADENOCARCINOMA PAPILAR INTRADUCTAL NAO INFILTRANTE",                                       
+                                                                "MELANOMA DE CELULAS EPITELIOIDES","LINFOMA NASAL E TIPO NASAL DE CELULAS TNK","DOENCA DE PAGET MAMARIA","MELANOMA MALIGNO EM NEVO JUNCIONAL","ANEMIA REFRATARIA","LEUCEMIA PROLINFOCITICA SOE","ASTROCITOMA SOE","CARCINOMA DE CELULAS GIGANTES E DE CELULAS FUSOCELULAR","CITOPENIA REFRATARIA COM DISPLASIA MULTILINHAGEM","DOEN\x80A DE HODGKIN ESCLEROSE NODULAR GRAU 1","RABDOMIOSSARCOMA SOE","LIPOSSARCOMA DE CELULAS REDONDAS",
+                                                                "MACROGLOBULINEMIA DE WALDENSTROM","ADENOMA BRONQUICO SOE","LINFOMA COMPOSTO: HODGKIN E NAOHODGKIN","TUMOR NEUROECTODERMICO PERIFERICO","POROMA ECRINO MALIGNO","CARCINOIDE TUBULAR","LIPOSSARCOMA SOE","ADENOCARCINOMA SEBACEO","DOENCA MIELOPROLIFERATIVA CRONICA SOE","HIDRADENOMA NODULAR MALIGNO","SARCOMA EPITELIOIDE","LINFOMA DE CELULAS T MADURAS SOE","TIMOMA MALIGNO","TUMOR MISTO MULLERIANO","ADENOMAS ENDOCRINOS MULTIPLOS",                                                            
+                                                                "DOENCA LINFOPROLIFERATIVA GAMAT","COMEDOCARCINOMA NAO INFILTRANTE","LEUCEMIA TIPO CELULAS PILOSAS","RABDOMIOSSARCOMA PLEOMORFICO TIPO ADULTO","PLASMOCITOMA SOE","LIPOSSARCOMA MIXOIDE","ADENOCARCINOMA TRABECULAR","CISTADENOCARCINOMA SOE","LEUCEMIA MIELOIDE AGUDA COM MATURACAO","TUMOR CISTICO MUCINOSO DE MALIGNIDADE LIMITROFE","OSTEOSSARCOMA SOE","LEUCEMIA LINFOBLASTICA DE CELULAS PRECURSORAS TIPO B",
+                                                                "DOENCA IMUNOPROLIFERATIVA SOE","ADENOCARCINOMA COM METAPLASIA ESCAMOSA","SINDROME DE SEZARY","MIELOSCLEROSE COM METAPLASIA MIELOIDE","TUMOR CARCINOIDE ATIPICO","LINFOMA MALIGNO LINFOPLASMOCITICO","ADENOCARCINOMA EM POLIPO ADENOMATOSO","LEUCEMIA CRONICA NEUTROFILICA","CARCINOMA ADENOESCAMOSO","CISTADENOCARCINOMA PAPILAR SOE","MENINGIOMA MALIGNO","SEMINOMA SOE","TUMOR ADENOCARCINOIDE","LINFOMA CUTANEO DE CELULAS T SOE",
+                                                                "CARCINOMA DE CELULAS PEQUENAS INTERMEDIARIAS","OSTEOSSARCOMA DE CELULAS PEQUENAS","CARCINOMA IN SITU INTRADUCTAL E LOBULAR","CARCINOMA DUCTAL DE GLANDULA SUDORIPARA ESCLEROSANTE","CARCINOMA ESCAMOCELULAR IN SITU COM INVASAO QUESTIONAVEL DO ESTROMA","CARCINOMA DE CELULAS RENAIS TIPO CROMOFOBO","LINFOMA DE HODGKIN TIPO LINFOCITICO","NEOPLASIA DE COMPORTAMENTO INCERTO SE BENIGNO OU MALIGNO",
+                                                                "PLASMOCITOMA EXTRAMEDULAR EXCETO OSSO M97313","MESOTELIOMA EPITELIOIDE MALIGNO","LINITE PLASTICA","TUMOR MISTO MALIGNO SOE","TUMOR PAPILAR INTRADUCTAL MUCINOSO COM DISPLASIA MODERADA","TIMOMA TIPO A SOE","CARCINOMA DE CELULAS RENAIS ASSOCIADO A CISTO","CARCINOMA SIMPLES","CARCINOMA PAPILAR DE SUPERFICIE SEROSA","SARCOMA INDIFERENCIADO","SARCOMA HISTIOCITICO","CARCINOMA ESCAMOSO DE CELULAS GRANDES NAO CERATINIZADO SOE",
+                                                                "CARCINOMA HEPATOCELULAR E COLANGIOCARCINOMA COMBINADOS","TUMOR DE CELULAS GIGANTES DO OSSO SOE","LEUCEMIA MIELOIDE AGUDA SEM MATURACAO","HEMANGIOENDOTELIOMA SOE","SARCOMA DO ESTROMA ENDOMETRIAL BAIXO GRAU","MIOEPITELIOMA MALIGNO,POLICITEMIA VERA","DOEN\x80A DE HODGKIN ESCLEROSE NODULAR GRAU 2","SARCOMA DO ESTROMA ENDOMETRIAL SOE","MELANOMA DESMOPLASICO MALIGNO","LEUCEMIA MIELOIDE AGUDA COM ANORMALIDADE EM 11q23",                                        
+                                                                "MELANOMA FUSOCELULAR SOE","CISTADENOMA SEROSO DE MALIGNIDADE LIMITROFE BORDERLINE","CARCINOMA DE CELULAS GIGANTES","CARCINOMA ESCAMOSO PAPILAR NAO INVASIVO","TIMOMA TIPO B1 SOE","CISTADENOCARCINOMA MUCINOSO SOE","ADENOCARCINOMA COM DIFERENCIACAO NEUROENDOCRINA","LINFOMA ANGIOIMUNOBLASTICO DE CELULAS T","CARCINOMA EM ADENOMA PLEOMORFICO","FIBROMIXOSSARCOMA","HEMANGIOENDOTELIOMA EPITELIOIDE MALIGNO",
+                                                                "GAMOPATIA MONOCLONAL DE SIGNIFICADO NAO DETERMINADO","CARCINOMA ESCAMOSO DE CELULAS PEQUENAS NAO CERATINIZADO","LIPOSSARCOMA DESDIFERENCIADO","CARCINOMA DE CELULAS RENAIS SARCOMATOIDE","LINFOMA DE CELULAS DA ZONA MARGINAL ESPLENICA","CARCINOMA DE APENDICE CUTANEO","ADENOMA VILOSO SOE","SARCOMA ALVEOLAR DE PARTES MOLES","ADENOCARCINOMA EXOCRINO MISTO DE CELULAS DAS ILHOTAS","ADENOCARCINOMA MUCINOSO TIPO ENDOCERVICAL",                                                
+                                                                "HEMANGIOENDOTELIOMA MALIGNO","CORDOMA CONDROIDE","PANMIELOSE AGUDA COM MIELOFIBROSE","TUMOR DE CELULAS DA GRANULOSA SOE","DERMATOFIBROSSARCOMA PROTUBERANTE PIGMENTADO","LEUCEMIA PROMIELOCITICA AGUDA T 1517 q22q1112","LEIOMIOSSARCOMA EPITELIOIDE","FIBROMA CELULAR","CARCINOMA NEUROENDOCRINO DE GRANDES CELULAS","LINFOMA LINFOBLASTICO DE CELULAS PRECURSORAS B","TUMOR BASOCELULAR","CARCINOMA LINFOEPITELIAL","NEURINOMATOSE",
+                                                                "CARCINOMA PLEOMORFICO","ADENOCARCINOMA ESQUIRROSO","LEUCEMIA DE PLASMOCITOS","PAPILOMA UROTELIAL","LEUCEMIA MONOCITICA AGUDA","TIMOMA TIPO A MALIGNO","ADENOCARCINOMA OXIFILICO","CARCINOMA FOLICULAR POUCO INVASIVO","CARCINOMA INTRACISTICO SOE","SARCOMA MIELOIDE","TUMOR FILODES MALIGNIDADE LIMITROFE","ADENOCARCINOMA IN SITU EM ADENOMA VILOSO","MELANOMA MALIGNO EM MELANOSE PRECANCEROSA","LEUCEMIA MIELOIDE AGUDA RELACIONADA AO TRATAMENTO SOE",
+                                                                "ASTROCITOMA GEMISTOCITICO","LIPOMA ATIPICO","CARCINOMA INTRACISTICO NAO INFILTRANTE","TUMOR MALIGNO TIPO DE CELULAS PEQUENAS","CARCINOMA HEPATOCELULAR PLEOMORFICO","SARCOMA DE CELULAS CLARAS EXCETO DO RIM M89643","ADENOCARCINOMA EM ADENOMA VILOSO","OSTEOSSARCOMA TELANGIECTASICO","NEURILEMOMA MALIGNO","CARCINOMA PAPILAR VARIANTE FOLICULAR","TUMOR DO ESTROMA DOS CORDOES SEXUAIS SOE","ASTROCITOMA ANAPLASICO","INSULINOMA MALIGNO",
+                                                                "TIMOMA TIPO B2 MALIGNO","OLIGODENDROGLIOMA ANAPLASICO","TUMOR DE KLATSKIN","ADENOCARCINOMA DE CELULAS MISTAS","PERINEUROMA MALIGNO","ADENOCARCINOMA FOLICULAR BEM DIFERENCIADO","MENINGIOMA DE CELULAS CLARAS","LEUCEMIA MIELOIDE AGUDA T 821 q22q22","ADENOCARCINOMA EM POLIPOSE ADENOMATOSA DO COLON","ADENOCARCINOMA POLIMORFO DE BAIXO GRAU","SARCOMA SINOVIAL FUSOCELULAR","ADENOCARCINOMA IN SITU EM ADENOMA TUBULOVILOSO",                                           
+                                                                "ADENOFIBROMA SEROSO MALIGNIDADE LIMITROFE","LEUCEMIA MIELOIDE CRONICA ATIPICA BCRABL NEGATIVA","CELULAS TUMORAIS MALIGNAS","TUMOR DE BRENNER MALIGNO","CARCINOMA DE CELULAS TRANSICIONAIS FUSIFORMES","GLIOBLASTOMA DE CELULAS GIGANTES","CARCINOMA LOBULAR IN SITU SOE","CONDROSSARCOMA MIXOIDE","CARCINOIDE DE CELULAS CALICIFORMES","TIMOMA SOE","SINDROME MIELODISPLASICA RELACIONADA A TERAPIA SOE","CARCINOMA DE DUCTOS COLETORES",                                                            
+                                                                "CARCINOFIBROMA","LINFOMA LINFOBLASTICO DE CELULAS PRECURSORAS SOE","LINFANGIOSSARCOMA","ADENOCARCINOMA DE GLANDULA SUDORIPARA","CARCINOMA DE CELULAS GRANULARES","LIPOSSARCOMA MISTO","ADENOCARCINOMA FOLICULAR TRABECULAR","NEUROBLASTOMA OLFATIVO","ADENOCARCINOMA HEPATOIDE","CARCINOMA HEPATOCELULAR ESQUIRROSO","TUMOR TROFOBLASTICO EPITELIOIDE","TUMOR DE GLANDULA SUDORIPARA SOE","DOEN\x80A DE HODGKIN CELULARIDADE MISTA SOE",
+                                                                "TUMOR CISTICO PAPILAR SEROSO DE MALIGNIDADE LIMITROFE","LESAO LINFOPROLIFERATIVA CUTANEA PRIMARIA DE CELULAS T CD30","ADENOCARCINOFIBROMA DE CELULAS CLARAS","LEUCEMIA MIELOIDE AGUDA COM EOSINOFILOS ANORMAIS NA MEDULA","LEUCEMIA DE CELULAS T DO ADULTOLINFOMA HTL V1","ADENOFIBROMA MUCINOSO MALIGNIDADE LIMITROFE","CARCINOMA TIMICO SOE","LINFOMA SUBCUTANEO TIPO PANICULITE DE CELULAS T","CARCINOMA CROMOFOBO",                                                                      
+                                                                "CARCINOMA EPITELIALMIOEPITELIAL","MENINGIOMA ATIPICO","ADENOCARCINOMA ECRINO","CARCINOMA BRONQUIOLO ALVEOLAR MUCINOSO","EPENDIMOMA SOE","MESONEFROMA MALIGNO","MASTOCITOSE MALIGNA","CISTADENOCARCINOMA DE CELULAS ACINOSAS","OSTEOSSARCOMA FIBROBLASTICO","MELANOMA MISTO EPITELIOIDE E FUSOCELULAR","HEPATOBLASTOMA","LEUCEMIA MIELOIDE AGUDA TIPO M6","TUMOR DE CELULAS ACINOSAS","GERMINOMA","LEUCEMIA CRONICA MIELOGENICA BCRABL POSITIVA",
+                                                                "ADENOCARCINOFIBROMA MUCINOSO","TUMOR DE CELULAS DE LEYDIG SOE","CARCINOMA PAPILAR INTRADUCTAL MUCINOSO NAO INVASIVO","DOEN\x80A DE HODGKIN ESCLEROSE NODULAR FASE CELULAR","OLIGODENDROGLIOMA SOE","CONDROSSARCOMA SOE","HEMANGIOPERICITOMA SOE","CARCINOMA BRONQUIOLO ALVEOLAR MISTO MUCINOSO E NAO MUCINOSO","GLIOMA MISTO","MIOFIBROMATOSE","CARCINOMA DO CORTEX SUPRARENAL","GLIOSSARCOMA","CARCINOMA BRONQUIOLO ALVEOLAR NAO MUCINOSO",
+                                                                "CONDROSSARCOMA DESDIFERENCIADO","CARCINOMA DE CELULAS DE SERTOLI","LEUCEMIA PROLINFOCITICA TIPO CELULAS T","FIBROMATOSE AGRESSIVA","SINDROME MIELODISPLASICA COM DELECAO 5q 5q","SARCOMA ESTROMAL SOE","LINFOMA INTESTINAL DE CELULAS T","TUMOR MALIGNO DE CELULAS CLARAS","CARCINOMA HEPATOCELULAR TIPO FUSOCELULAR","CARCINOMA PAPILAR CELULAS OXIFILICAS","HEMANGIOPERICITOMA MALIGNO","TUMOR MALIGNO DA BAINHA DE NERVO PERIFERICO",
+                                                                "TUMOR MALIGNO FIBROSO SOLITARIO","CARCINOMA SECRETOR DA MAMA","FIBROMATOSE ABDOMINAL","ADENOCARCINOMA EM POLIPOS ADENOMATOSOS MULTIPLOS","LEUCEMIA LINFOBLASTICA DE CELULAS T PRECURSORAS","TERATOMA MALIGNO SOE","OSTEOBLASTOMA AGRESSIVO","PARAGANGLIOMA SOE","ADENOCARCINOMA COM METAPLASIA CARTILAGINOSA E OSSEA","DOEN\x80A DE HODGKIN PREDOMINANCIA LINFOCITICA NODULAR","CONDROSSARCOMA DE CELULAS CLARAS",                                                         
+                                                                "LINFOMA LINFOBLASTICO DE CELULAS PRECURSORAS T","ANEMIA REFRATARIA COM EXCESSO DE BLASTOS EM TRANSFORMACAO","CARCINOMA PAPILAR CELULAS COLUNARES","ADENOCARCINOMA TIPO ENDOCERVICAL","ADENOCARCINOFIBROMA SEROSO","TUMOR DE SACO VITELINO","LEUCEMIA LINFOCITICA DE CELULAS GRANDES TIPO T GRANULARES","SARCOMA DE CELULAS DENDRITICAS FOLICULAR","MELANOMA DE CELULAS BALONIFORMES","DOENCA DE DEPOSITO DE IMUNOGLOBULINA",
+                                                                "ADENOCARCINOMA DE PROPAGACAO SUPERFICIAL","SARCOMA SINOVIAL BIFASICO","ADENOMA FOLICULAR ATIPICO","TUMOR GLOMICO MALIGNO","OSTEOSSARCOMA CENTRAL","RABDOMIOSSARCOMA ALVEOLAR","ADENOCARCINOMA COM METAPLASIA FUSOCELULAR","CARCINOMA DE CELULAS POLIGONAIS","HEMANGIOENDOTELIOMA EPITELIOIDE SOE","PARAGANGLIOMA MALIGNO","DOEN\x80A DE HODGKIN DEPLECAO LINFOCITICA SOE","TUMOR NEUROECTODERMICO PRIMITIVO SOE","CARCINOMA MEDULAR ATIPICO",
+                                                                "FEOCROMOCITOMA MALIGNO","TUMOR DE CELULAS DAS ILHOTAS SOE","CARCINOMA INTRADUCTAL MICROPAPILAR","CISTADENOCARCINOMA DE DUCTOS BILIARES","MASTOCITOMA SOE","TUMOR DE CELULAS GRANULARES MALIGNO","TUMOR ESTROMAL SOE","CARCINOMA DE CELULAS DAS ILHOTAS","ANEMIA REFRATARIA COM SIDEROBLASTOS","TUMOR MUCOEPIDERMOIDE","TIMOMA TIPO AB SOE","MEDULOBLASTOMA SOE","ADENOFIBROMA ENDOMETRIOIDE DE MALIGNIDADE LIMITROFE","CARCINOIDE COMPOSTO",
+                                                                "CARCINOMA DE CELULAS PEQUENAS FUSIFORMES","ADENOMA ENDOMETRIOIDE DE MALIGNIDADE LIMITROFE","CARCINOMA ESCAMOSO COM FORMACAO CORNEA","GASTRINOMA MALIGNO","COMEDOCARCINOMA SOE","CARCINOMA DE GRANDES CELULAS RABDOIDE","CARCINOMA PAPILAR INTRADUCTAL MUCINOSO INVASIVOCISTADENOCARCINOMA MUCINOSO NAO INVASIVO","CARCINOMA INSULAR","TIMOMA TIPO B1 MALIGNO","LIPOSSARCOMA FIBROBLASTICO","ADENOCARCINOMA PAPILAR ECRINO","LEUCEMIA AGUDA BIFENOTIPICA",
+                                                                "MESOTELIOMA FIBROSO MALIGNO","TUMOR CARCINOIDE SOE DO APENDICE","CARCINOMA HEPATOCELULAR DE CELULAS CLARAS","HISTIOCITOSE DE CELULAS DE LANGERHANS SOE","TUMOR MALIGNO DE CELULAS GIGANTES DE PARTES MOLES","RABDOMIOSSARCOMA EMBRIONARIO SOE","SEMINOMA ESPERMATOCITICO","MESOTELIOMA BIFASICO MALIGNO","TERATOMA SOE","SARCOMA DE CELULAS DENDRITICAS DIGITIFORME","LEUCEMIA PROLINFOCITICA TIPO CELULAS B","ADENOCARCINOMA COM METAPLASIA APOCRINA",
+                                                                "LESAO IMUNOPROLIFERATIVA ANGIOCENTRICA","ADAMANTINOMA DE OSSOS LONGOS","CONDROSSARCOMA MESENQUIMAL","LEUCEMIA DE CELULAS DE BURKITT","GLIOMATOSE CEREBRAL","MELANOMA FUSOCELULAR TIPO B","ASTROCITOMA FIBRILAR","ADENOCARCINOMA ENDOMETRIOIDE DE CELULAS CILIADAS","TUMOR DE CELULAS DE SERTOLILEYDIG POUCO DIFERENCIADA","CARCINOMA HEPATOCELULAR FIBROLAMELAR","CARCINOMA DE CELULAS GIGANTES SEMELHANTES A OSTEOCLASTO","LINFANGIOMIOMATOSE",
+                                                                "TUMOR MALIGNO DE CELULAS GIGANTES TENOSSINOVIAL","TIMOMA TIPO B3 SOE","CORIOCARCINOMA SOE","LEIOMIOSSARCOMA MIXOIDE","MELANOMA MALIGNO EM NEVO PIGMENTADO GIGANTE","MESENQUIMOMA SOE","LEIOMIOMATOSE SOE","CARCINOMA ESCLEROSANTE NAOENCAPSULADO","OLIGODENDROBLASTOMA","ESPIRADENOMA ECRINO MALIGNO","TUMOR MALIGNO DE CELULAS GIGANTES DO OSSO","CARCINOMA DE CELULAS PARIETAIS","SARCOMA DE CELULAS DE LANGERHANS",                                                         
+                                                                "NEOPLASIA INTRATUBULAR DE CELULAS GERMINATIVAS","TIMOMA TIPO B2 SOE","GANGLIOGLIOMA","TUMOR MIOFIBROBLASTICO SOE","CRANIOFARINGIOMA ADAMANTINOMATOSO","TIMOMA TIPO AB MALIGNO","SARCOMA RABDOIDE","SARCOMA SINOVIAL DE CELULAS EPITELIOIDES","MESENQUIMOMA MALIGNO","TUMOR HIPERNEFROIDE","LEUCEMIA DE CELULAS TIPO NK AGRESSIVA","FIBROBLASTOMA DE CELULAS GIGANTES","CARCINOMA PSEUDOPAPILAR SOLIDO","TUMOR DO GLOMO JUGULAR SOE","CARCINOMA EMBRIONARIO SOE",
+                                                                "SARCOMA DE C\x90LULAS CLARAS DO RIM","TUMOR DO CORPO CAROTIDEO","GASTRINOMA SOE","NEVO AZUL MALIGNO","FIBROMA DESMOPLASICO","DISGERMINOMA","TUMOR PSEUDOPAPILAR SOLIDOHEMANGIOBLASTOMA","MIOSSARCOMA","CARCINOMA PAPILAR ENCAPSULADO","ESTROMA OVARIANO MALIGNO","TUMOR DE MUSCULO LISO DE MALIGNIDADE LIMITROFE","CARCINOMA CISTICO HIPERSSECRETOR","MENINGIOMA PAPILAR","LINFOMA MALIGNO DO MEDIASTINO DE CELULAS GRANDES B","AMELOBLASTOMA MALIGNO",
+                                                                "TUMOR ODONTOGENICO MALIGNO","MENINGIOMATOSE SOE","TUMOR DE BRENNER DE MALIGNIDADE LIMITROFE","TUMOR MISTO MESODERMICO","CARCINOSSARCOMA EMBRIONARIO","ADENOCARCINOMA FETAL","TUMOR DE CELULAS GIGANTES DE PARTES MOLES SOE","TUMOR DO CORPO AORTICO","CARCINOMA DUCTAL DESMOPLASICO","NEUROBLASTOMA SOE","POLIEMBRIOMA","RABDOMIOSSARCOMA FUSOCELULAR","TIMOMA TIPO B3 MALIGNO","CARCINOMA DE CELULAS VITREAS","CARCINOMA RICO EM LIPIDES",
+                                                                "SARCOMA DE CELULAS PEQUENAS","MESOTELIOMA CISTICO SOE","CARCINOMA ACIDOFILO","CRANIOFARINGIOMA","ASTROCITOMA PROTOPLASMATICO","CARCINOMA MISTO MEDULAR PAPILAR","HISTIOCITOMA FIBROSO ANGIOMATOIDE","ASTROCITOMA PILOCITICO","EPENDIMOMA PAPILAR","TUMOR MALIGNO DE CELULAS DE LEYDIG","CARCINOMA SCHNEIDERIANO","TUMOR MALIGNO TIPO DE CELULAS GIGANTES","NEVO PIGMENTADO GIGANTE SOE","OSTEOSSARCOMA PERIOSTAL","MELANOMA FUSOCELULAR TIPO A",
+                                                                "TUMOR MALIGNO DA BAINHA DE NERVO PERIFERICO COM DIFERENCIACAO RABDOMIOBLASTICA","TUMOR MISTO DE CELULAS GERMINATIVAS","ANGIOMIXOMA","HISTIOCITOSE MALIGNA","RABDOMIOSSARCOMA TIPO MISTO","CISTADENOMA MUCINOSO PAPILAR DE MALIGNIDADE LIMITROFE","CARCINOMA MEDULAR COM ESTROMA LINFOIDE","OSTEOSSARCOMA EM DOENCA DE PAGET DO OSSO","PAPILOMA DE CELULAS TRANSICIONAIS TIPO INVERTIDO SOE","CORDOMA DESDIFERENCIADO",                                                                  
+                                                                "TUMOR PAPILAR DE SUPERFICIE SEROSA MALIGNIDADE LIMITROFE","NEUROFIBROMATOSE SOE","NEUROCITOMA CENTRAL","CARCINOMA MEDULAR COM ESTROMA AMILOIDE","MEDULOBLASTOMA DESMOPLASICO NODULAR","ANDROBLASTOMA SOE","CORIOCARCINOMA COMBINADO COM OUTROS ELEMENTOS DE CELULAS GERMINATIVAS","TUMOR ODONTOGENICO SOE","TUMOR DE CELULAS ESTEROIDE MALIGNO","ADENOFIBROMA DE CELULAS CLARAS MALIGNIDADE LIMITROFE",                                     
+                                                                "CARCINOMA DA GLANDULA PITUITARIASOE","PARAGANGLIOMA EXTRASUPRARENAL SOE","PINEOCITOMA","EPENDIMOMA MIXOPAPILAR","HISTIOCITOSE DE CELULAS DE LANGERHANS MULTIFOCAL","PARAGANGLIOMA EXTRASUPRARENAL MALIGNO","CARCINOIDE DE CELULAS ENTEROCROMAFINICAS","TUMORLET SOE","HISTIOCITOSE DE CELULAS DE LANGERHANS DISSEMINADA","MELANOSE PRECANCEROSA SOE","CARCINOMA RICO EM GLICOGENIO","TUMOR DESMOPLASICO DE CELULAS PEQUENAS E REDONDAS",
+                                                                "TUMOR DE CELULAS DE SERTOLILEYDIG RETIFORME","TERATOMA COM TRANSFORMACAO MALIGNA","DOEN\x80A DE HODGKIN DEPLECAO LINFOCITICA RETICULAR","XANTOASTROCITOMA PLEOMORFICO","LINFOMA HEPATOESPLENICA TIPO GAMADELTA","SINDROME HIPEREOSINOFILICO","TUMOR FIBROHISTIOCITICO PLEXIFORME","PINEOBLASTOMA","TUMOR DE CELULAS DE SERTOLILEYDIG COM DIFERENCIACAO INTERMEDIARIA E ELEMENTOS HETEROLOGOS",
+                                                                "TUMOR CISTICO MUCINOSO COM DISPLASIA MODERADA","LINFADENOPATIA ANGIOIMUNOBLASTICA","SARCOMA CEREBELAR SOE","OSTEOSSARCOMA DE SUPERFICIE DE ALTO GRAU","TUMOR DE CELULAS DE SERTOLI SOE","TUMOR DE CELULAS DA TECAGRANULOSA","CISTADENOMA PAPILAR DE MALIGNIDADE LIMITROFE","CARCINOIDE DE CELULAS SEMELHANTES A ENTEROCROMAFINICAS SOE","LEUCEMIA DE MASTOCITOS","OSTEOSSARCOMA PARAOSTAL","EFUSAO POR LINFOMA PRIMARIO","LEIOMIOMA METASTATIZANTE",
+                                                                "OSTEOSSARCOMA INTRAOSSEO BEM DIFERENCIADO","DOENCA DE CADEIA PESADA SOE","SEMINOMA ANAPLASICO","CARCINOMA MISTO MEDULAR FOLICULAR","TUMOR DE CELULAS DE SERTOLILEYDIG COM DIFERENCIACAO INTERMEDIARIA","ASTROBLASTOMA","TUMOR DE ASKIN","GANGLIOGLIOMA ANAPLASICO","MELANOCITOMA MENINGEANO","FIBROSSARCOMA PERIOSTAL","ADENOCARCINOMA CERUMINOSOCARCINOMA DE PLEXO COROIDE","CONDROMATOSE SOE","TUMOR MALIGNO DE CELULAS SEMELHANTES A ENTEROCROMAFINICAS",
+                                                                "CRANIOFARINGIOMA PAPILAR","SUBEPENDIMOMA","TERATOCARCINOMA","TUMOR DOS CORDOES SEXUAIS COM TUBULOS ANULARES","SARCOMA DE HODGKIN","RETINOBLASTOMA DIFERENCIADO","GLUCAGONOMA MALIGNO","BLASTOMA PULMONAR","SOMATOSTATINOMA SOE","TUMOR DE CELULAS GERMINATIVAS NAO SEMINOMATOSO","GLIOMA CORDOIDE","ASTROCITOMA SUBEPENDIMAL DE CELULAS GIGANTES","APUDOMA","TUMOR CISTICO DE CELULAS CLARAS MALIGNIDADE LIMITROFE",
+                                                                "TUMOR DE CELULAS DE SERTOLILEYDIG POUCO DIFERENCIADO COM ELEMENTOS HETEROLOGOS","ADENOMATOSE PULMONAR","TUMOR DO ESTROMA DOS CORDOES SEXUAIS FORMAS MISTAS","GANGLIONEUROBLASTOMA","CONDROBLASTOMA MALIGNO","TECOMA MALIGNO","HEMANGIOENDOTELIOMA FUSOCELULAR","MOLA HIDATIFORME INVASIVA","PARAGANGLIOMA SIMPATICO","TUMOR DO ESTROMA DOS CORDOES SEXUAIS COM DIFERENCIACAO INCOMPLETA","SARCOMATOSE MENINGEA","NEFROBLASTOMA SOE","CARCINOMA BASOFILO",
+                                                                "MEDULOMIOBLASTOMA","SARCOMA DE MASTOCITOS","SARCOMA EMBRIONARIO","BLASTOMA PLEURO PULMONAR","NEFROMA MESOBLASTICO","GLUCAGONOMA SOE","NEFROMA MALIGNO CISTICO","GONADOBLASTOMA","DOEN\x80A DE HODGKIN DEPLECAO LINFOCITICA COM FIBROSE DIFUSA","TUMOR TROFOBLASTICO DE LOCALIZACAO PLACENTARIA","FIBROSSARCOMA AMELOBLASTICO","ANDROBLASTOMA MALIGNO","TUMOR EPITELIAL FUSOCELULAR SEMELHANTE A CELULAS TIMICAS","TUMOR JUVENIL DE CELULAS DA GRANULOSA",
+                                                                "MEDULOEPITELIOMA SOE","OSTEOCONDROMATOSE SOE","HISTIOCITOSE DE CELULAS DE LANGERHANS UNIFOCAL","PAPILOMA ATIPICO DE PLEXO COROIDE","FIBROSSARCOMA DE FASCIA","TERATOMA MALIGNO INDIFERENCIADO","NEUROCITOMA OLFATORIO","TERATOMA MALIGNO INTERMEDIARIO","OSTEOSSARCOMA INTRACORTICAL","CONDROSSARCOMA JUSTACORTICAL","TUMOR DE CELULAS DE SERTOLI GRANDES CELULAS E CALCIFICADAS","TUMOR NEUROGENICO OLFATIVO","MEDULOBLASTOMA DE CELULAS GRANDES",
+                                                                "RETINOBLASTOMA SOE","TUMOR TERATOIDERABDOIDE ATIPICO","NEUROEPITELIOMA SOE","PINEALOMA","PANCREATOBLASTOMA","GLIOFIBROMA","NEFROBLASTOMA CISTICO PARCIALMENTE DIFERENCIADO","LEUCEMIA MIELOMONOCITICA JUVENIL","MEDULOEPITELIOMA TERATOIDE","ASTROCITOMA DESMOPLASTICO INFANTI","FIBROSSARCOMA INFANTIL","LEUCEMIA BASOFILICA AGUDA","RETINOBLASTOMA INDIFERENCIADO","RABDOMIOSSARCOMA COM DIFERENCIACAO GANGLIONICA","MELANOMATOSE MENINGEANA","SIALOBLASTOMA"), labels(c(seq.int(1:701)))))  
+# Tratando dados faltantes:
+class(dfmodel$TRATCONS)
+dfmodel$TRATCONS <- as.numeric(as.character(dfmodel$TRATCONS))
+class(dfmodel$TRATCONS)
+mean(dfmodel$TRATCONS, na.rm = TRUE)
+dfmodel$TRATCONS = ifelse(is.na(dfmodel$TRATCONS), mean(dfmodel$TRATCONS, na.rm = TRUE), dfmodel$TRATCONS)
+sum(is.na(dfmodel$TRATCONS))
+
+class(dfmodel$DIAGTRAT)
+dfmodel$DIAGTRAT <- as.numeric(as.character(dfmodel$DIAGTRAT))
+class(dfmodel$DIAGTRAT)
+mean(dfmodel$DIAGTRAT, na.rm = TRUE)
+dfmodel$DIAGTRAT = ifelse(is.na(dfmodel$DIAGTRAT), mean(dfmodel$DIAGTRAT, na.rm = TRUE), dfmodel$DIAGTRAT)
+sum(is.na(dfmodel$DIAGTRAT))
+
+class(dfmodel$DESCTOPO)
+dfmodel$DESCTOPO <- as.numeric(as.character(dfmodel$DESCTOPO))
+class(dfmodel$DESCTOPO)
+mean(dfmodel$DESCTOPO, na.rm = TRUE)
+dfmodel$DESCTOPO = ifelse(is.na(dfmodel$DESCTOPO), mean(dfmodel$DESCTOPO, na.rm = TRUE), dfmodel$DESCTOPO)
+sum(is.na(dfmodel$DESCTOPO))
+
+class(dfmodel$DESCMORFO)
+dfmodel$DESCMORFO <- as.numeric(as.character(dfmodel$DESCMORFO))
+class(dfmodel$DESCMORFO)
+mean(dfmodel$DESCMORFO, na.rm = TRUE)
+dfmodel$DESCMORFO = ifelse(is.na(dfmodel$DESCMORFO), mean(dfmodel$DESCMORFO, na.rm = TRUE), dfmodel$DESCMORFO)
+sum(is.na(dfmodel$DESCMORFO))
+
+class(dfmodel$DSCCIDO)
+dfmodel$DSCCIDO <- as.numeric(as.character(dfmodel$DSCCIDO))
+class(dfmodel$DSCCIDO)
+mean(dfmodel$DSCCIDO, na.rm = TRUE)
+dfmodel$DSCCIDO = ifelse(is.na(dfmodel$DSCCIDO), mean(dfmodel$DSCCIDO, na.rm = TRUE), dfmodel$DSCCIDO)
+sum(is.na(dfmodel$DSCCIDO))
+
+class(dfmodel$IBGE)
+dfmodel$IBGE <- as.numeric(as.character(dfmodel$IBGE))
+class(dfmodel$IBGE)
+
+class(dfmodel$MORFO)
+dfmodel$MORFO <- as.numeric(as.character(dfmodel$MORFO))
+class(dfmodel$MORFO)
+
+class(dfmodel$CIDO)
+dfmodel$CIDO <- as.numeric(as.character(dfmodel$CIDO))
+class(dfmodel$CIDO)
+
+class(dfmodel$TOPO)
+dfmodel$TOPO <- as.numeric(as.character(dfmodel$TOPO))
+class(dfmodel$TOPO)
+
+# Escalonamento
+glimpse(dfmodel)
+
+dfmodel[,1:3] = scale(dfmodel[,1:3])
+dfmodel[,7:8] = scale(dfmodel[,7:8])
+dfmodel[,19] = scale(dfmodel[,19])
+dfmodel[,21:51] = scale(dfmodel[,21:51])
+dfmodel[,53:58] = scale(dfmodel[,53:58])
+
+# Excluindo colunas que não tem variância
+dfmodel$S <- NULL
+dfmodel$QUIMIOANT <- NULL
+dfmodel$HORMOANT <- NULL
+dfmodel$TMOANT <- NULL
+dfmodel$IMUNOANT <- NULL
+dfmodel$OUTROANT <- NULL
+dfmodel$ERRO <- NULL  
+
+# Verificando se ainda existe valores faltantes
+dfmodel[is.na(dfmodel), ] 
+
+########################################################################
+###                                                                  ###
+###                         REDES NEURAIS                            ###
+###                                                                  ###
+########################################################################
+
+# Separando o dataset para treinamento e teste
+
+set.seed(1)
+separacao <- sample.split(dfmodel$TRATAMENTO, SplitRatio = 0.70)
+treinamento <- subset(dfmodel, separacao == TRUE)
+teste <- subset(dfmodel, separacao == FALSE)
+
+h2o.init(nthreads = -1)
+
+classificador = h2o.deeplearning(y = 'TRATAMENTO',
+                                 training_frame = as.h2o(treinamento),
+                                 hidden = c(100,100,100), #quantas camadas escondidas - 1 camada oculta com 100 neurônios
+                                 epochs = 100) #quantas vezes vai ser feito o ajuste de pesos
+
+previsao <- h2o.predict(classificador, newdata = as.h2o(teste[-54]))
+previsao <- previsao$predict
+previsao <- as.vector(previsao)
+matrizconfusao <- table(teste[,54], previsao)
+confusionMatrix(matrizconfusao)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -28,6 +28,15 @@ library(caTools)
 library(h2o)
 library(caret)
 
+
+library(sf)         # Simple features for R
+
+
+install.packages("pacman")
+install.packages('BiocManager')
+library(pacman)
+pacman::p_load(tmap, statR, tidyverse, sp, cartogram)
+
 dados = read.dbf(file = "pacigeral.dbf") #pacote raster para leitura de .dbf
 
 ########################################################################
@@ -91,11 +100,10 @@ mapa$IBGE <- mapa$CD_MUN
 nokid <- dados
 nokid <- filter(nokid, IDADE > 12)
 
-
 nokid$IBGE <- as.numeric(as.character(nokid$IBGE))
 class(nokid$IBGE)
 class(nokid$CIDADE)
-class(nokid$PCID)
+class(mapa$PCID)
 
 nokid <- subset(nokid, select = c(IBGE, CIDADE, PCID))
 nokid <- group_by(nokid, IBGE, CIDADE) %>%
@@ -103,28 +111,24 @@ nokid <- group_by(nokid, IBGE, CIDADE) %>%
 
 # Unindo os dados no mapa
 
+mapa <- st_as_sf(mapa)
+st_crs(mapa)
+
 mapa=merge(mapa,nokid,by="IBGE", all.x=T) 
-names(nokid)
+mapa$PCID <- mapa$`sum(PCID)`
+names(mapa)
 
 # Customizando o mapa do Estado de São Paulo
 tmap_mode("plot")
 tm_shape(mapa)+
-  tm_fill("IBGE", auto.palette.mapping=FALSE, 
-          title="Cidades de São Paulo")+
+  tm_fill(col = "#F0FFF0")+
+  tm_style("col_blind")+
   tm_legend(position=c("left","bottom"))+
-  tm_borders(alpha=.5)+
-  tm_bubbles(size = 'PCID',col = '#b3de69', title.size='CIDADE') +
-  tm_legend(legend.format = list(text.separator= "a"))
+  tm_compass()+
+  tm_scale_bar()+
+  tm_borders(alpha=0.3)+
+  tm_symbols(col = "#FFA500", size = "PCID", title.size = "Quantidade de pacientes", scale =3)
 
-
-# mapa remodelado (mais bonito)
-tmap_mode("plot")
-tm_shape(mapa)+
-  tm_fill()+
-  tm_borders()+
-tm_bubbles(size = 'IBGE',col = '#b3de69', title.size='IBGE')
-
-############## FALTA CUSTOMIZAR O MAPA E COLOCAR OS DADOS DENTRO DAS CIDADES
 
 -----------------------------------------------------------------------------
  
@@ -164,7 +168,32 @@ anos$TOTAL <- sum(anos$PCID)
   anos$ULTINFO[anos$ULTINFO==2] <- "Vivo, SOE"
   anos$ULTINFO[anos$ULTINFO==3] <- "Obito por cancer"
   anos$ULTINFO[anos$ULTINFO==4] <- "Obito por outras causas, SOE"
-
+ 
+anos$TRATAMENTO = as.character(factor(anos$TRATAMENTO, levels = c("A","B","C","D","E","F","G","H","I","J"), labels(c("Cirurgia", "Radioterapia", "Quimioterapia", "Cirurgia + Radioterapia", "Cirurgia + Quimioterapia", "Radioterapia + Quimioterapia", "Cirurgia + Radio + Quimio", "Cirurgia + Radio + Quimio + Hormonio", "Outras combinações de tratamento", "Nenhum tratamento realizado")))) 
+  anos$TRATAMENTO[anos$TRATAMENTO=="A"] <- "Cirurgia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="B"] <- "Radioterapia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="C"] <- "Quimioterapia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="D"] <- "Cirurgia + Radioterapia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="E"] <- "Cirurgia + Quimioterapia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="F"] <- "Radioterapia + Quimioterapia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="G"] <- "Cirurgia + Radio + Quimio"
+  anos$TRATAMENTO[anos$TRATAMENTO=="H"] <- "Cirurgia + Radio + Quimio + Hormonio"
+  anos$TRATAMENTO[anos$TRATAMENTO=="I"] <- "Outras combinações de tratamento"
+  anos$TRATAMENTO[anos$TRATAMENTO=="J"] <- "Nenhum tratamento realizado"
+  
+  anos$TRATAMENTO[anos$TRATAMENTO=="1"] <- "Cirurgia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="2"] <- "Radioterapia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="3"] <- "Quimioterapia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="4"] <- "Cirurgia + Radioterapia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="5"] <- "Cirurgia + Quimioterapia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="6"] <- "Radioterapia + Quimioterapia"
+  anos$TRATAMENTO[anos$TRATAMENTO=="7"] <- "Cirurgia + Radio + Quimio"
+  anos$TRATAMENTO[anos$TRATAMENTO=="8"] <- "Cirurgia + Radio + Quimio + Hormonio"
+  anos$TRATAMENTO[anos$TRATAMENTO=="9"] <- "Outras combinações de tratamento"
+  anos$TRATAMENTO[anos$TRATAMENTO=="10"] <- "Nenhum tratamento realizado"
+  
+  
+  
 ############# PRIMEIRO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR SEXO ###############
 
 dtg1 <-group_by(anos, SEXO) %>%
@@ -172,32 +201,42 @@ dtg1 <-group_by(anos, SEXO) %>%
   
 dtg1$TOTAL <- dtg1$`sum(PCID)`
 
-g1 <- ggplot(dtg1, aes(x = SEXO, y = TOTAL, fill = factor(SEXO))) +
-  geom_col(position = "dodge")+
-  labs(title = "Total de pacientes com câncer dividido por sexo",
-       x = "Sexo", 
-       y = "Total de pacientes")
+g1 <- ggplot(dtg1, aes(x = SEXO, y = TOTAL, 
+                       fill = factor(TOTAL))) +
+                       geom_col(position = "dodge")+
+                       geom_label(aes(label = `sum(PCID)`))+
+                       scale_fill_manual(values=c("#00BFFF",
+                             "#FF8C00"))+
+                       labs(title = "Total de pacientes com câncer dividido por sexo",
+                       x = "Sexo", 
+                       y = "Total de pacientes")+
+                       theme_test()
+g1
 
-ggplotly(g1 + scale_fill_manual(values=c('#00BFFF',
-                                         '#DA70D6')))
+ggplotly(g1)
+
+
 
 ---------------------------------------------------------------------------------------
 
 
 ############# SEGUNDO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR ANO ###############
 
-dtg2 <-group_by(anos, ANODIAG) %>%
+dtg2 <-group_by(anos, ANODIAG, SEXO) %>%
   summarise(sum(PCID))
 
 dtg2$TOTAL <- dtg2$`sum(PCID)`
 
-g2 <- ggplot(dtg2, aes(x = ANODIAG, y = TOTAL, fill = factor(ANODIAG))) +
-  geom_col(position = "dodge")+
-  labs(title = "Total de pacientes com câncer por ano de 2000 a 2022",
+g2 <- ggplot(dtg2, aes(x = ANODIAG, y = `sum(PCID)`, fill = factor(SEXO))) +
+  geom_col(colour = "#F0F8FF", position = "stack") + 
+  scale_fill_manual(values=c("#00BFFF",
+                             "#FF8C00"))+
+  labs(title = "Total de pacientes com câncer durante o período de 2000 a 2022",
        x = "Anos", 
-       y = "Total de pacientes")
+       y = "Total de pacientes")+
+  theme_test()
+ggplotly(g2)
 
-ggplotly(g2 + scale_fill_brewer(palette = "BrBG"))
 
 -----------------------------------------------------------------------------
 
@@ -236,12 +275,16 @@ dtg5 <-group_by(anos, CATEATEND) %>%
 dtg5$TOTAL <- dtg5$`sum(PCID)`
 
 g5 <- ggplot(dtg5, aes(x = CATEATEND, y = TOTAL, fill = factor(CATEATEND))) +
-  geom_bar(position = "dodge", stat='identity')+ 
-  labs(title = "Total de pacientes com câncer por Categoria de atendimento",
+  geom_col(colour = "#F0F8FF", position = "stack") + 
+  scale_fill_manual(values=c("#FFE4B5",
+                             "#F0E68C",
+                             "#FFA500",
+                             "#FF8C00"))+
+  labs(title = "Total de pacientes com câncer atendidos por Categoria",
        x = "Categoria de atendimento", 
-       y = "Total de pacientes")
-
-ggplotly(g5+ scale_fill_brewer(palette = "BrBG"))
+       y = "Total de pacientes")+
+  theme_test()
+ggplotly(g5)
 
 ############# SEXTO GRÁFICO - TOTAL DE PACIENTES COM CÂNCER POR NÃO ATENDIMENTO ###############
 
@@ -278,12 +321,14 @@ dtg8 <-group_by(anos, TRATAMENTO) %>%
 dtg8$TOTAL <- dtg8$`sum(PCID)`
 
 g8 <- ggplot(dtg8, aes(x = TRATAMENTO, y = TOTAL, fill = factor(TRATAMENTO))) +
-  geom_bar(position = "dodge", stat='identity')+ 
-  labs(title = "Total de pacientes com câncer - Tratamento",
-       x = "Tratamento", 
-       y = "Total de pacientes")
+                       geom_col(colour = "#F0F8FF", position = "stack") + 
+                       scale_fill_brewer(palette = "YlOrBr")+
+                       labs(title = "Total de pacientes com câncer - Tratamento",
+                       x = "Tratamento", 
+                       y = "Total de pacientes")+
+                       theme_test()
+ggplotly(g8)
 
-ggplotly(g8 + scale_fill_brewer(palette = "BrBG"))
 
 ########################################################################
 ###                                                                  ###
